@@ -72,5 +72,18 @@ function auction(uuid, price, bytes, name) {
   assert.strictEqual(fired2.length, 0, 'over-budget flip must be filtered out');
   console.log('PASS budget filter rejects over-budget flips');
 
+  // One sale must count as one sample even when variant === base, or the
+  // minSampleSize gate stops meaning anything for plain items.
+  const { decodeItemBytes, readItem, pricingKeys } = require('../src/main/engine/nbt');
+  const plainItem = readItem(await decodeItemBytes(fx.plain.item_bytes));
+  const plainKeys = pricingKeys(plainItem);
+  assert.strictEqual(plainKeys.variant, plainKeys.base, 'fixture should be a plain item');
+  const dedup = new Flipper(cfg);
+  const rows = [...new Set([plainKeys.variant, plainKeys.base].filter(Boolean))]
+    .map(k => ({ key: k, price: 1000, auctionId: `sale1:${k}` }));
+  dedup.book.addSales(rows);
+  assert.strictEqual(dedup.book.soldStats(plainKeys.base).n, 1, 'one sale must be one sample');
+  console.log('PASS one sale counts once for plain items');
+
   console.log('\nALL PIPELINE TESTS PASSED');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });

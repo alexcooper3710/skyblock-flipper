@@ -36,10 +36,23 @@ npm test           # offline tests against real Hypixel item_bytes
 Put your key in Settings, or drop a `config.json` next to `config.example.json`.
 The auction and bazaar endpoints are public; a key mainly buys you headroom.
 
+## It remembers the market between runs
+
+`auctions_ended` only hands out ~90 sales a minute, so a cold start needs the
+full 45-minute window before sold-median pricing means anything. The price book
+is written to `price-book.json` in the app's user-data folder every 60s and on
+quit, and reloaded at launch (samples outside the window are dropped, a corrupt
+file starts cold with a warning). So the second launch onward is useful
+immediately instead of 45 minutes later.
+
 ## Copying without alt-tabbing
 
 `Ctrl+Alt+1` … `Ctrl+Alt+5` copy the top five live flips from anywhere, so you
 can stay in Minecraft. Clicking a row copies it too.
+
+The window always opens centred on a display that currently exists, and only
+after the first paint - a saved position from a monitor you no longer have is a
+classic way to end up with an app that is "running" but nowhere on screen.
 
 ## The four strategies
 

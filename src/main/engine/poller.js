@@ -4,6 +4,8 @@
 // whenever someone else's queue gets around to you.
 
 const EventEmitter = require('events');
+const fs = require('fs');
+const path = require('path');
 const api = require('./api');
 const { decodeItemBytes, readItem, pricingKeys } = require('./nbt');
 const { PriceBook } = require('./pricing');
@@ -38,7 +40,33 @@ class Flipper extends EventEmitter {
     this.running = false;
     this.warmedUp = false;
     this.timers = [];
+    this.persistPath = cfg.persistPath || null;
     this.stats = { snapshots: 0, flips: 0, lastCycleMs: 0, decodes: 0, totalAuctions: 0 };
+  }
+
+  loadBook() {
+    if (!this.persistPath || !fs.existsSync(this.persistPath)) return 0;
+    try {
+      const n = this.book.hydrate(JSON.parse(fs.readFileSync(this.persistPath, 'utf8')));
+      if (n) this.log('info', `restored ${n} sold samples from the last run`);
+      return n;
+    } catch (e) {
+      this.log('warn', `price book unreadable, starting cold: ${e.message}`);
+      return 0;
+    }
+  }
+
+  saveBook() {
+    if (!this.persistPath) return;
+    try {
+      fs.mkdirSync(path.dirname(this.persistPath), { recursive: true });
+      // write-then-rename so a crash mid-write can't leave a truncated file
+      const tmp = this.persistPath + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(this.book.serialize()));
+      fs.renameSync(tmp, this.persistPath);
+    } catch (e) {
+      this.log('warn', `could not save price book: ${e.message}`);
+    }
   }
 
   log(level, msg, extra) { this.emit('log', { level, msg, extra, at: Date.now() }); }
@@ -47,6 +75,8 @@ class Flipper extends EventEmitter {
     if (this.running) return;
     this.running = true;
     api.setApiKey(this.cfg.apiKey);
+    this.loadBook();
+    this.loopPersist();
     this.loopAuctions();
     this.loopSold();
     if (this.cfg.strategies.bazaarAndCraft) this.loopBazaar();
@@ -56,6 +86,14 @@ class Flipper extends EventEmitter {
     this.running = false;
     this.timers.forEach(clearTimeout);
     this.timers = [];
+    this.saveBook();
+  }
+
+  async loopPersist() {
+    while (this.running) {
+      await this.sleep(60000);
+      if (this.running) this.saveBook();
+    }
   }
 
   sleep(ms) {
@@ -174,10 +212,11 @@ class Flipper extends EventEmitter {
             const item = readItem(await decodeItemBytes(s.item_bytes));
             const keys = pricingKeys(item);
             if (!keys) return null;
-            return [
-              { key: keys.variant, price: s.price, at: s.timestamp, auctionId: s.auction_id + ':v' },
-              { key: keys.base, price: s.price, at: s.timestamp, auctionId: s.auction_id + ':b' },
-            ];
+            // For a plain item variant === base. Recording both would count one
+            // sale twice and let a single sale satisfy minSampleSize.
+            return [...new Set([keys.variant, keys.base].filter(Boolean))].map(k => (
+              { key: k, price: s.price, at: s.timestamp, auctionId: `${s.auction_id}:${k}` }
+            ));
           } catch { return null; }
         });
         this.book.addSales(sales.filter(Boolean).flat());

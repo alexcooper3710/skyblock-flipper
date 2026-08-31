@@ -130,6 +130,33 @@ class PriceBook {
     return candidates[0];
   }
 
+  // --- persistence ----------------------------------------------------------
+  // auctions_ended only yields ~90 sales a minute, so a cold start needs the
+  // full window before sold-median means anything. Keeping it across restarts
+  // is the difference between "useful now" and "useful in 45 minutes".
+  serialize() {
+    this.prune();
+    const sold = [];
+    for (const [k, arr] of this.sold) {
+      // cap per key so one liquid item can't bloat the file
+      sold.push([k, arr.slice(-40).map(x => [x.price, x.at])]);
+    }
+    return { v: 1, savedAt: Date.now(), windowMs: this.windowMs, sold };
+  }
+
+  hydrate(data) {
+    if (!data || data.v !== 1 || !Array.isArray(data.sold)) return 0;
+    const cutoff = Date.now() - this.windowMs;
+    let restored = 0;
+    for (const [k, rows] of data.sold) {
+      const kept = rows
+        .filter(r => Array.isArray(r) && r[1] >= cutoff)
+        .map(([price, at]) => ({ price, at }));
+      if (kept.length) { this.sold.set(k, kept); restored += kept.length; }
+    }
+    return restored;
+  }
+
   stats() {
     return {
       soldKeys: this.sold.size,
