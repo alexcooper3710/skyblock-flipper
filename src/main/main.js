@@ -4,9 +4,10 @@
 
 process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '16';
 
-const { app, BrowserWindow, ipcMain, clipboard, globalShortcut, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, clipboard, globalShortcut, Tray, Menu, nativeImage, screen } = require('electron');
 const path = require('path');
 const store = require('./store');
+const { TRAY_PNG_DATA_URL } = require('./icon');
 const { Flipper } = require('./engine/poller');
 
 let win = null;
@@ -39,20 +40,37 @@ function copyFlip(index) {
   send('copied', { index, uuid: flip.uuid, name: flip.name });
 }
 
+// A saved position from a monitor you no longer have is how an app ends up
+// "open" with nothing on screen. Always land on a display that exists.
+function safeBounds(width, height) {
+  const area = screen.getPrimaryDisplay().workArea;
+  return {
+    width: Math.min(width, area.width),
+    height: Math.min(height, area.height),
+    x: Math.round(area.x + (area.width - Math.min(width, area.width)) / 2),
+    y: Math.round(area.y + (area.height - Math.min(height, area.height)) / 2),
+  };
+}
+
 function createWindow() {
   win = new BrowserWindow({
-    width: 1180, height: 800, minWidth: 900, minHeight: 600,
+    ...safeBounds(1180, 800),
+    minWidth: 900, minHeight: 600,
+    show: false,
     backgroundColor: '#0d1017',
     title: 'SkyBlock Flipper',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
   win.setMenuBarVisibility(false);
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  // Only show once there is something to paint, so you never get a blank frame.
+  win.once('ready-to-show', () => win.show());
   win.webContents.on('did-finish-load', () => send('config', cfg));
 }
 
 app.whenReady().then(() => {
   cfg = store.load(app.getPath('userData'));
+  cfg.persistPath = path.join(app.getPath('userData'), 'price-book.json');
   createWindow();
   startEngine();
 
@@ -63,7 +81,10 @@ app.whenReady().then(() => {
   }
 
   try {
-    tray = new Tray(nativeImage.createEmpty());
+    const trayIcon = nativeImage.createFromDataURL(TRAY_PNG_DATA_URL);
+    if (trayIcon.isEmpty()) throw new Error('tray icon failed to decode');
+    tray = new Tray(trayIcon);
+    tray.on('click', () => { if (win) { win.show(); win.focus(); } });
     tray.setToolTip('SkyBlock Flipper');
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'Show', click: () => win && win.show() },
@@ -85,5 +106,8 @@ ipcMain.handle('set-config', (_e, patch) => {
 });
 ipcMain.handle('restart-engine', () => { startEngine(); return true; });
 
-app.on('will-quit', () => globalShortcut.unregisterAll());
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+  if (engine) engine.stop();   // flushes the price book to disk
+});
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
