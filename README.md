@@ -76,6 +76,20 @@ Valuation deliberately uses the **second** lowest BIN, not the lowest. You have 
 undercut something to actually sell, and if two people dumped the same item at the
 same low price, that price is the truth and the "flip" isn't one.
 
+## If it won't start
+
+`npm start` failing with *"Electron failed to install correctly"* means the
+dependency tree installed but Electron's separate ~100MB binary download from
+GitHub did not. The tell is `node_modules/electron` sitting at ~2MB with no
+`path.txt` in it.
+
+`run-flipper.bat` detects exactly that and repairs it: it clears
+`node_modules\electron` **and** Electron's zip cache under
+`%LocalAppData%\electron\Cache` (a truncated cached download fails identically),
+reinstalls, and falls back to the npmmirror CDN if GitHub is unreachable. If it
+still can't, it drops `flipper-run.log` and `npm-last.log` beside the script with
+the real error in them.
+
 ## Known limitation: craft recipes
 
 Hypixel removed recipes from `/resources/skyblock/items` — 0 of 5,650 items

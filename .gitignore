@@ -4,3 +4,5 @@ config.json
 *.log
 .cache/
 package-lock.json
+flipper-run.log
+npm-last.log
