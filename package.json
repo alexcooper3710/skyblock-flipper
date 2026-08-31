@@ -1,0 +1,33 @@
+{
+  "name": "skyblock-flipper",
+  "version": "1.0.0",
+  "description": "Self-hosted Hypixel SkyBlock auction flipper - snapshot-synced, no artificial delay.",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "engine": "node scripts/engine-cli.js",
+    "smoke": "node scripts/smoke.js",
+    "dist": "electron-builder --win",
+    "test": "node test/parse.test.js && node test/pipeline.test.js && node test/bazaar.test.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "prismarine-nbt": "^2.8.0"
+  },
+  "devDependencies": {
+    "electron": "^32.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "dev.local.skyblockflipper",
+    "productName": "SkyBlock Flipper",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    }
+  }
+}

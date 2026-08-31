@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SkyBlock Flipper</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <h1><span class="dot" id="dot"></span>SkyBlock Flipper</h1>
+  <div class="stat">snapshot <b id="s-snap">—</b></div>
+  <div class="stat">auctions <b id="s-auc">—</b></div>
+  <div class="stat">cycle <b id="s-cycle">—</b></div>
+  <div class="stat">sold samples <b id="s-sold">—</b></div>
+  <div class="spacer"></div>
+  <div class="stat" id="s-hint">Ctrl+Alt+1…5 copies the top flips</div>
+</header>
+
+<nav>
+  <button class="on" data-tab="flips">Auction flips</button>
+  <button data-tab="bazaar">Bazaar</button>
+  <button data-tab="settings">Settings</button>
+  <button data-tab="log">Log</button>
+</nav>
+
+<main>
+  <section id="tab-flips">
+    <div class="warnbar" id="warmup">Building the baseline snapshot — the first pass only learns the market, flips start on the next one.</div>
+    <div class="head"><span></span><span>Item</span><span class="num">Buy</span><span class="num">Worth</span><span class="num">Profit</span><span>Basis</span></div>
+    <div id="flips"></div>
+    <div class="empty" id="flips-empty">Waiting for the next snapshot…</div>
+  </section>
+
+  <section id="tab-bazaar" class="hidden">
+    <div class="head"><span></span><span>Product</span><span class="num">Buy</span><span class="num">Sell</span><span class="num">Profit</span><span>Type</span></div>
+    <div id="bazaar"></div>
+    <div class="empty" id="bazaar-empty">Bazaar refreshes every 60s…</div>
+  </section>
+
+  <section id="tab-settings" class="hidden">
+    <div class="grid2">
+      <div><label>Hypixel API key</label><input type="text" id="c-apiKey" placeholder="paste key"></div>
+      <div><label>Max budget (coins)</label><input type="number" id="c-maxBudget"></div>
+      <div><label>Min profit (coins)</label><input type="number" id="c-minProfit"></div>
+      <div><label>Min margin %</label><input type="number" id="c-minMarginPct"></div>
+      <div><label>Min sold samples</label><input type="number" id="c-minSampleSize"></div>
+      <div><label>Sold window (minutes)</label><input type="number" id="c-soldWindowMinutes"></div>
+      <div><label>Page concurrency</label><input type="number" id="c-pageConcurrency"></div>
+      <div><label>Bazaar min weekly volume</label><input type="number" id="c-bzVolume"></div>
+      <div><label>Bazaar min spread %</label><input type="number" id="c-bzSpread"></div>
+      <div><label>Bazaar min profit / flip</label><input type="number" id="c-bzProfit"></div>
+    </div>
+    <div class="toggles">
+      <label><input type="checkbox" id="c-lowestBinSnipe"> Lowest-BIN snipe</label>
+      <label><input type="checkbox" id="c-soldMedian"> Sold median</label>
+      <label><input type="checkbox" id="c-attributeAware"> Attribute-aware</label>
+      <label><input type="checkbox" id="c-bazaarAndCraft"> Bazaar + craft</label>
+      <label><input type="checkbox" id="c-sound"> Sound on new flip</label>
+    </div>
+    <button class="primary" id="save">Save &amp; restart engine</button>
+  </section>
+
+  <section id="tab-log" class="hidden"><div id="logs"></div></section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
