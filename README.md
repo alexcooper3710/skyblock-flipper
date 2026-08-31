@@ -26,6 +26,10 @@ can beat that, and anyone claiming otherwise is selling something.
 
 ## Running it
 
+Windows: double-click **`run-flipper.bat`** — it installs on first run, then launches.
+
+Or by hand:
+
 ```bash
 npm install
 npm start          # the Electron app
