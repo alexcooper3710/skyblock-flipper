@@ -1,0 +1,22 @@
+{
+  "apiKey": "",
+  "maxBudget": 200000000,
+  "minProfit": 1000000,
+  "minMarginPct": 8,
+  "minSampleSize": 3,
+  "soldWindowMinutes": 45,
+  "pageConcurrency": 16,
+  "strategies": {
+    "lowestBinSnipe": true,
+    "soldMedian": true,
+    "attributeAware": true,
+    "bazaarAndCraft": true
+  },
+  "bazaar": {
+    "minWeeklyVolume": 200000,
+    "minSpreadPct": 6,
+    "minProfitPerFlip": 100000
+  },
+  "blacklistIds": ["SKYBLOCK_MENU"],
+  "sound": true
+}
