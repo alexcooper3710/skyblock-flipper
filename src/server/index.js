@@ -14,7 +14,9 @@ const cfg = store_.load(path.join(os.homedir(), '.skyblock-flipper'));
 // Env wins over config so you can run it without a key sitting in a file.
 cfg.apiKey = process.env.HYPIXEL_API_KEY || cfg.apiKey || '';
 cfg.alerts = Object.assign({ flipProfit: 2000000, unusual: true, unusualZ: 4, cooldownMs: 15 * 60000 }, cfg.alerts);
-const dataDir = cfg.dataDir || path.join(os.homedir(), '.skyblock-flipper');
+// Keep the database alongside the project rather than in the home directory:
+// it stays with the checkout, it is easy to find, and it is inspectable.
+const dataDir = cfg.dataDir || path.join(__dirname, '..', '..', 'data');
 cfg.persistPath = path.join(dataDir, 'price-book.json');
 
 const store = new Store(path.join(dataDir, 'market.db'));

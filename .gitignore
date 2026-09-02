@@ -6,3 +6,4 @@ config.json
 package-lock.json
 flipper-run.log
 npm-last.log
+data/
