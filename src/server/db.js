@@ -182,6 +182,63 @@ class Store {
     return total;
   }
 
+  // --- bazaar reads ---------------------------------------------------------
+  // bz_history was being written every minute and almost never read. These are
+  // what make the bazaar a first-class side of the terminal rather than a feed.
+
+  bazaarLatest(product) {
+    return this.one('SELECT * FROM bz_history WHERE product = ? ORDER BY ts DESC LIMIT 1', product);
+  }
+
+  // Most recent row per product, for browsing the whole book.
+  bazaarBook(q, limit = 300) {
+    const like = q ? `%${q.toUpperCase()}%` : '%';
+    return this.all(`
+      SELECT b.* FROM bz_history b
+      JOIN (SELECT product, MAX(ts) AS ts FROM bz_history GROUP BY product) m
+        ON m.product = b.product AND m.ts = b.ts
+      WHERE b.product LIKE ?
+      ORDER BY b.sell_vol_week DESC LIMIT ?`, like, limit);
+  }
+
+  bazaarMovers(sinceMs, limit = 40) {
+    return this.all(`
+      WITH latest AS (
+        SELECT product, sell_order, buy_order,
+               ROW_NUMBER() OVER (PARTITION BY product ORDER BY ts DESC) AS rn
+        FROM bz_history WHERE ts >= ?
+      ),
+      first AS (
+        SELECT product, sell_order,
+               ROW_NUMBER() OVER (PARTITION BY product ORDER BY ts ASC) AS rn
+        FROM bz_history WHERE ts >= ?
+      )
+      SELECT l.product, f.sell_order AS then_price, l.sell_order AS now_price,
+             l.buy_order,
+             (l.sell_order - f.sell_order) * 100.0 / f.sell_order AS pct
+      FROM latest l JOIN first f ON f.product = l.product AND f.rn = 1
+      WHERE l.rn = 1 AND f.sell_order > 0
+      ORDER BY ABS(pct) DESC LIMIT ?`, sinceMs, sinceMs, limit);
+  }
+
+  searchAll(q, limit = 40) {
+    const like = `%${q.toUpperCase()}%`;
+    const ah = this.all(`
+      SELECT key AS id, 'ah' AS kind, COUNT(*) AS n FROM bin_history
+      WHERE key LIKE ? GROUP BY key ORDER BY n DESC LIMIT ?`, like, limit);
+    const bz = this.all(`
+      SELECT product AS id, 'bz' AS kind, COUNT(*) AS n FROM bz_history
+      WHERE product LIKE ? GROUP BY product ORDER BY n DESC LIMIT ?`, like, limit);
+    // an item can legitimately be both; show it once, tagged with both markets
+    const seen = new Map();
+    for (const r of [...bz, ...ah]) {
+      const prev = seen.get(r.id);
+      if (prev) prev.kind = 'both';
+      else seen.set(r.id, { ...r });
+    }
+    return [...seen.values()].sort((a, b) => b.n - a.n).slice(0, limit);
+  }
+
   stats() {
     const q = (s) => (this.one(s) || {}).n || 0;
     return {

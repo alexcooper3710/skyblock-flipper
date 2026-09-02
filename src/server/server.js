@@ -78,9 +78,12 @@ function createServer({ store, collector, cfg }) {
       const r = RANGES[u.searchParams.get('range') || '24h'] || RANGES['24h'];
       const since = r.ms === Infinity ? 0 : Date.now() - r.ms;
       const current = store.one('SELECT * FROM bin_history WHERE key = ? ORDER BY ts DESC LIMIT 1', key);
+      const bzCurrent = store.bazaarLatest(key);
       return json(res, 200, {
         key,
+        kind: current && bzCurrent ? 'both' : bzCurrent ? 'bz' : 'ah',
         current,
+        bzCurrent,
         bin: store.priceHistory(key, since, r.bucket),
         sales: store.salesHistory(key, since, r.bucket),
         bazaar: store.bzHistory(key, since, r.bucket),
@@ -92,11 +95,22 @@ function createServer({ store, collector, cfg }) {
     if (p === '/api/search') {
       const q = (u.searchParams.get('q') || '').trim().toUpperCase();
       if (q.length < 2) return json(res, 200, { results: [] });
-      return json(res, 200, {
-        results: store.all(`
-          SELECT key, MAX(ts) AS ts, COUNT(*) AS n FROM bin_history
-          WHERE key LIKE ? GROUP BY key ORDER BY n DESC LIMIT 40`, `%${q}%`),
+      return json(res, 200, { results: store.searchAll(q) });
+    }
+
+    // --- browse the bazaar book ---------------------------------------------
+    if (p === '/api/bazaar') {
+      const q = (u.searchParams.get('q') || '').trim();
+      const rows = store.bazaarBook(q, 300).map(r => {
+        const spread = r.sell_order - r.buy_order;
+        return {
+          id: r.product, buy: r.buy_order, sell: r.sell_order,
+          instantBuy: r.instant_buy, instantSell: r.instant_sell,
+          spread, spreadPct: r.buy_order > 0 ? (spread / r.buy_order) * 100 : 0,
+          buyVol: r.buy_vol_week, sellVol: r.sell_vol_week, ts: r.ts,
+        };
       });
+      return json(res, 200, { rows });
     }
 
     // --- market overview ----------------------------------------------------
@@ -122,7 +136,11 @@ function createServer({ store, collector, cfg }) {
       const volume = store.all(`
         SELECT key, COUNT(*) AS sales, AVG(price) AS avg, SUM(price) AS coins
         FROM sales WHERE ts >= ? GROUP BY key ORDER BY coins DESC LIMIT 40`, now - back);
-      return json(res, 200, { movers, volume, spreads: collector.lastBazaar.orders.slice(0, 40) });
+      return json(res, 200, {
+        movers, volume,
+        spreads: collector.lastBazaar.orders.slice(0, 40),
+        bzMovers: store.bazaarMovers(now - back, 40),
+      });
     }
 
     // --- watchlist ----------------------------------------------------------

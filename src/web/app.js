@@ -20,7 +20,7 @@ const ago = (ts) => {
 };
 const CSS = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
-const state = { flips: [], bazaar: { orders: [], crafts: [] }, alerts: [], watchlist: [],
+const state = { flips: [], bazaar: { orders: [], crafts: [] }, alerts: [], watchlist: [], bzQuery: '',
   range: '24h', item: null, flipFilter: 'all', bzMode: 'orders', ovMode: 'movers', unseen: 0 };
 
 // ---------------------------------------------------------------- charts
@@ -163,8 +163,34 @@ function renderFlips() {
   t.appendChild(tb); host.appendChild(t);
 }
 
+async function renderBazaarBook() {
+  const host = $('bazaar');
+  const r = await fetch('/api/bazaar?q=' + encodeURIComponent(state.bzQuery || '')).then(r => r.json()).catch(() => null);
+  host.innerHTML = '';
+  if (!r || !r.rows.length) { host.appendChild(el('div', 'empty', 'No bazaar history stored yet - give it a minute.')); return; }
+  const t = el('table');
+  t.innerHTML = '<thead><tr><th>Product</th><th class="r">Buy</th><th class="r">Sell</th><th class="r">Spread</th></tr></thead>';
+  const tb = el('tbody');
+  for (const b of r.rows) {
+    const tr = el('tr');
+    if (state.item === b.id) tr.className = 'sel';
+    const c1 = el('td', 'name');
+    c1.appendChild(el('div', null, b.id));
+    c1.appendChild(el('div', 'sub', `vol ${fmt(b.sellVol)}/wk · insta ${fmt(b.instantBuy)}/${fmt(b.instantSell)}`));
+    tr.append(c1, el('td', 'r num', fmt(b.buy)), el('td', 'r num', fmt(b.sell)));
+    const c4 = el('td', 'r num');
+    c4.innerHTML = `${fmt(b.spread)}<div class="sub">${b.spreadPct.toFixed(1)}%</div>`;
+    tr.appendChild(c4);
+    tr.onclick = () => selectItem(b.id, b.id);
+    tb.appendChild(tr);
+  }
+  t.appendChild(tb); host.appendChild(t);
+}
+
 function renderBazaar() {
   const host = $('bazaar');
+  $('bz-search').style.display = state.bzMode === 'browse' ? 'block' : 'none';
+  if (state.bzMode === 'browse') return renderBazaarBook();
   const rows = state.bazaar[state.bzMode] || [];
   host.innerHTML = '';
   if (!rows.length) { host.appendChild(el('div', 'empty', 'Nothing clearing your thresholds right now.')); return; }
@@ -209,6 +235,19 @@ async function renderOverview() {
       tb.appendChild(tr);
     }
     t.appendChild(tb); host.appendChild(t);
+  } else if (state.ovMode === 'bz') {
+    if (!data.bzMovers || !data.bzMovers.length) { host.appendChild(el('div', 'empty', 'Needs a few bazaar snapshots first.')); return; }
+    const t = el('table');
+    t.innerHTML = '<thead><tr><th>Product</th><th class="r">Was</th><th class="r">Now</th><th class="r">6h</th></tr></thead>';
+    const tb = el('tbody');
+    for (const m of data.bzMovers) {
+      const tr = el('tr');
+      tr.append(el('td', 'name', m.product), el('td', 'r num', fmt(m.then_price)), el('td', 'r num', fmt(m.now_price)));
+      tr.appendChild(el('td', 'r num ' + (m.pct >= 0 ? 'pos' : 'neg'), pct(m.pct)));
+      tr.onclick = () => selectItem(m.product, m.product);
+      tb.appendChild(tr);
+    }
+    t.appendChild(tb); host.appendChild(t);
   } else if (state.ovMode === 'volume') {
     const t = el('table');
     t.innerHTML = '<thead><tr><th>Item</th><th class="r">Sales</th><th class="r">Avg</th><th class="r">Coins</th></tr></thead>';
@@ -245,20 +284,35 @@ async function selectItem(key, label) {
   if (!d) { host.appendChild(el('div', 'empty', 'Could not load that item.')); return; }
 
   const cur = d.current;
+  const bz = d.bzCurrent;
   const hero = el('div', 'hero');
-  hero.innerHTML = `<span class="big">${cur ? fmt(cur.lowest) : '—'}</span>
-    <span class="lbl">lowest BIN${cur && cur.second ? ` · 2nd ${fmt(cur.second)}` : ''}${cur ? ` · ${cur.depth} listed` : ''}</span>`;
+  if (cur) {
+    hero.innerHTML = `<span class="big">${fmt(cur.lowest)}</span>
+      <span class="lbl">lowest BIN${cur.second ? ` · 2nd ${fmt(cur.second)}` : ''} · ${cur.depth} listed</span>`;
+  } else if (bz) {
+    const spread = bz.sell_order - bz.buy_order;
+    hero.innerHTML = `<span class="big">${fmt(bz.sell_order)}</span>
+      <span class="lbl">bazaar sell order · buy ${fmt(bz.buy_order)} · spread ${fmt(spread)}
+      (${bz.buy_order ? ((spread / bz.buy_order) * 100).toFixed(1) : '0'}%)</span>`;
+  } else {
+    hero.innerHTML = '<span class="big">—</span><span class="lbl">no history stored for this item yet</span>';
+  }
+  if (d.kind) hero.appendChild(el('span', 'kindtag ' + d.kind, d.kind === 'both' ? 'AH + BZ' : d.kind.toUpperCase()));
   const watch = el('button', 'act', state.watchlist.some(w => w.key === key) ? 'Unwatch' : 'Watch');
   watch.onclick = () => toggleWatch(key, label);
   hero.appendChild(watch);
   host.appendChild(hero);
 
-  const wrap = el('div', 'chartwrap');
-  host.appendChild(wrap);
-  lineChart(wrap, [
-    { label: 'lowest BIN', color: CSS('--series-1'), area: true, points: d.bin.map(r => [r.t, r.low]) },
-    { label: 'sold avg', color: CSS('--series-3'), points: d.sales.map(r => [r.t, r.avg]) },
-  ]);
+  // Only draw the auction panel if the item is actually on the auction house -
+  // a bazaar-only product should not get an empty AH chart above its book.
+  if (d.bin.length || d.sales.length) {
+    const wrap = el('div', 'chartwrap');
+    host.appendChild(wrap);
+    lineChart(wrap, [
+      { label: 'lowest BIN', color: CSS('--series-1'), area: true, points: d.bin.map(r => [r.t, r.low]) },
+      { label: 'sold avg', color: CSS('--series-3'), points: d.sales.map(r => [r.t, r.avg]) },
+    ]);
+  }
   if (d.sales.length) {
     const vw = el('div', 'chartwrap');
     host.appendChild(vw);
@@ -273,9 +327,21 @@ async function selectItem(key, label) {
     ], { height: 140 });
   }
 
-  const mini = el('div', 'mini');
+  if (bz) {
+    const bzm = el('div', 'mini');
+    bzm.innerHTML = `<span class="chip">insta buy <b>${fmt(bz.instant_buy)}</b></span>
+      <span class="chip">insta sell <b>${fmt(bz.instant_sell)}</b></span>
+      <span class="chip">buy vol/wk <b>${fmt(bz.buy_vol_week)}</b></span>
+      <span class="chip">sell vol/wk <b>${fmt(bz.sell_vol_week)}</b></span>`;
+    host.appendChild(bzm);
+  }
+
   const sales = d.recentSales;
-  if (sales.length) {
+  // the AH sales summary is meaningless for a bazaar-only product
+  const mini = el('div', 'mini');
+  if (!sales.length && d.kind === 'bz') {
+    // nothing to say - the bazaar chips above already cover it
+  } else if (sales.length) {
     const avg = sales.reduce((a, s) => a + s.price, 0) / sales.length;
     mini.innerHTML = `<span class="chip">recent sales <b>${sales.length}</b></span>
       <span class="chip">avg <b>${fmt(avg)}</b></span>
@@ -386,6 +452,13 @@ seg('range', 'range', () => state.item && selectItem(state.item, $('item-title')
 seg('bz-mode', 'bzMode', renderBazaar);
 seg('ov-mode', 'ovMode', renderOverview);
 
+let bzTimer;
+$('bz-search').addEventListener('input', (e) => {
+  clearTimeout(bzTimer);
+  state.bzQuery = e.target.value.trim();
+  bzTimer = setTimeout(renderBazaarBook, 180);
+});
+
 $('clear-alerts').onclick = async () => {
   await fetch('/api/alerts/seen', { method: 'POST' });
   state.unseen = 0; $('s-alerts').textContent = '0';
@@ -404,8 +477,10 @@ $('search').addEventListener('input', (e) => {
     drop.innerHTML = '';
     if (!r.results.length) { drop.style.display = 'none'; return; }
     for (const row of r.results) {
-      const d = el('div', null, row.key);
-      d.onclick = () => { drop.style.display = 'none'; $('search').value = ''; selectItem(row.key, row.key); };
+      const d = el('div');
+      d.appendChild(document.createTextNode(row.id));
+      d.appendChild(el('span', 'kindtag ' + row.kind, row.kind === 'both' ? 'AH+BZ' : row.kind.toUpperCase()));
+      d.onclick = () => { drop.style.display = 'none'; $('search').value = ''; selectItem(row.id, row.id); };
       drop.appendChild(d);
     }
     const box = $('search').getBoundingClientRect();
