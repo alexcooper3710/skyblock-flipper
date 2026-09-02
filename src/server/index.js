@@ -10,6 +10,9 @@ const { createServer } = require('./server');
 const store_ = require('../main/store');
 
 const cfg = store_.load(path.join(os.homedir(), '.skyblock-flipper'));
+// The auction and bazaar endpoints are public; a key only buys rate headroom.
+// Env wins over config so you can run it without a key sitting in a file.
+cfg.apiKey = process.env.HYPIXEL_API_KEY || cfg.apiKey || '';
 cfg.alerts = Object.assign({ flipProfit: 2000000, unusual: true, unusualZ: 4, cooldownMs: 15 * 60000 }, cfg.alerts);
 const dataDir = cfg.dataDir || path.join(os.homedir(), '.skyblock-flipper');
 cfg.persistPath = path.join(dataDir, 'price-book.json');
@@ -29,6 +32,7 @@ server.listen(PORT, HOST, () => {
   console.log('  SkyBlock Terminal');
   console.log(`  http://${HOST}:${PORT}`);
   console.log(`  data: ${dataDir}  (${size} MB)`);
+  console.log(`  api:  ${cfg.apiKey ? 'key loaded' : 'no key (public endpoints - fine, just lower rate limits)'}`);
   console.log('');
   collector.start();
 });

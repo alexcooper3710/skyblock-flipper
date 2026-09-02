@@ -62,8 +62,19 @@ npm run engine     # same engine, headless, prints to the terminal
 npm test           # offline tests against real Hypixel item_bytes
 ```
 
-Put your key in Settings, or drop a `config.json` next to `config.example.json`.
-The auction and bazaar endpoints are public; a key mainly buys you headroom.
+### The API key
+
+The auction and bazaar endpoints are public - the terminal works with no key at
+all, at lower rate limits. To use one, either:
+
+```bash
+set HYPIXEL_API_KEY=your-key        # Windows, this shell only
+export HYPIXEL_API_KEY=your-key     # bash
+```
+
+or copy `config.example.json` to `config.json` and fill in `apiKey`.
+`config.json` is gitignored, so a key never ends up in a commit. On boot the
+terminal prints which of the two it found.
 
 ## It remembers the market between runs
 
