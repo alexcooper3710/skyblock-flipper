@@ -1,4 +1,4 @@
-# SkyBlock Flipper
+# SkyBlock Terminal
 
 A self-hosted Hypixel SkyBlock auction flipper. Same copy-and-paste workflow as
 Cofl — you click a flip, it puts `/viewauction <uuid>` on your clipboard, you
@@ -24,7 +24,32 @@ So you see a snapshot within about a second of it existing, every minute, instea
 of 30–60 seconds late. **The ceiling is the API's own refresh rate** — no client
 can beat that, and anyone claiming otherwise is selling something.
 
-## Running it
+## Two ways to run it
+
+**The terminal** (recommended) - a local server you open in a browser:
+
+```bash
+npm run terminal      # then open http://127.0.0.1:8787
+```
+
+Windows: double-click **`run-terminal.bat`**, which starts it and opens the tab.
+
+Six live panels: flip feed, item detail with price history, bazaar order book and
+craft flips, market overview (movers / volume / spreads), watchlist, and alerts.
+Storage is SQLite through **`node:sqlite`**, which ships inside Node 22.5+ - no
+native build step and no postinstall download, so there is nothing that can
+silently fail to install.
+
+### Why not GitHub Pages
+
+Pages is static hosting: no server process, so nothing polls the API and nothing
+accumulates history. A static page only holds data for as long as its tab is open,
+which is incompatible with keeping price history at all. The terminal has to run
+somewhere that can execute code and write a database - your machine, or any box
+you control. (A Pages site *can* work as a read-only companion, fed by a scheduled
+GitHub Action committing snapshots, but Actions' 5-minute floor rules out flips.)
+
+## Running the desktop app instead
 
 Windows: double-click **`run-flipper.bat`** — it installs on first run, then launches.
 
