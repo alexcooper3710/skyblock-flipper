@@ -1,14 +1,15 @@
 {
   "name": "skyblock-flipper",
   "version": "1.0.0",
-  "description": "Self-hosted Hypixel SkyBlock auction flipper - snapshot-synced, no artificial delay.",
+  "description": "Self-hosted Hypixel SkyBlock auction + bazaar terminal. Snapshot-synced flip detection, SQLite market history, live panels in the browser.",
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
     "engine": "node scripts/engine-cli.js",
     "smoke": "node scripts/smoke.js",
     "dist": "electron-builder --win",
-    "test": "node test/parse.test.js && node test/pipeline.test.js && node test/bazaar.test.js && node test/persistence.test.js"
+    "test": "node test/parse.test.js && node test/pipeline.test.js && node test/bazaar.test.js && node test/persistence.test.js && node test/server.test.js",
+    "terminal": "node src/server/index.js"
   },
   "author": "",
   "license": "MIT",

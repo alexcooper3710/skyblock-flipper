@@ -163,6 +163,7 @@ class Flipper extends EventEmitter {
       if (c) entries.push({ bin: true, price: a.starting_bid, keys: c.keys });
     }
     this.book.rebuildBinWall(entries);
+    this.emit('wall', { ts: lastUpdated, wall: this.book.lowestBin });
 
     // First snapshot only establishes the baseline - firing flips off it would
     // just be reacting to the entire existing market as if it were new.
@@ -189,6 +190,10 @@ class Flipper extends EventEmitter {
     }
     flips.sort((a, b) => b.profit - a.profit);
     this.stats.flips += flips.length;
+    this.emit('snapshot', {
+      ts: lastUpdated, totalAuctions: auctions.length, binCount: bins.length,
+      newBins: fresh.length, cycleMs: this.stats.lastCycleMs,
+    });
     this.log('info', `snapshot +${fresh.length} new BINs -> ${flips.length} flips`);
     if (flips.length) this.emit('flips', flips);
   }
@@ -219,7 +224,9 @@ class Flipper extends EventEmitter {
             ));
           } catch { return null; }
         });
-        this.book.addSales(sales.filter(Boolean).flat());
+        const rows = sales.filter(Boolean).flat();
+        this.book.addSales(rows);
+        if (rows.length) this.emit('sales', rows);
       } catch (e) {
         this.log('warn', `sold feed: ${e.message}`);
       }
@@ -234,9 +241,14 @@ class Flipper extends EventEmitter {
         const { body } = await api.getBazaar();
         const missing = bazaarEngine.validateRatios(body.products);
         if (missing.length) this.log('warn', `craft table: ${missing.length} unknown ids`, missing.slice(0, 5));
+        const books = new Map();
+        for (const [id, product] of Object.entries(body.products)) {
+          books.set(id, bazaarEngine.topOfBook(product));
+        }
         this.emit('bazaar', {
-          orders: bazaarEngine.orderFlips(body.products, this.cfg).slice(0, 40),
-          crafts: bazaarEngine.craftFlips(body.products, this.cfg).slice(0, 40),
+          orders: bazaarEngine.orderFlips(body.products, this.cfg).slice(0, 60),
+          crafts: bazaarEngine.craftFlips(body.products, this.cfg).slice(0, 60),
+          books,
           at: Date.now(),
         });
       } catch (e) {
