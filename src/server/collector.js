@@ -120,6 +120,20 @@ class Collector extends EventEmitter {
   }
 
   checkBazaar(b) {
+    // watchlist first - a bazaar item never touches the BIN wall, so without
+    // this a watch on ENCHANTED_DIAMOND could never fire.
+    for (const [product, t] of b.books) {
+      const w = this.watch.get(product);
+      if (!w) continue;
+      const price = t.sellOrder || t.instantSell;
+      if (!price) continue;
+      if (w.below && price <= w.below) {
+        this.raise('watch', product, `${w.label || product} at or below ${fmt(w.below)}`, `bazaar ${fmt(price)}`);
+      }
+      if (w.above && price >= w.above) {
+        this.raise('watch', product, `${w.label || product} at or above ${fmt(w.above)}`, `bazaar ${fmt(price)}`);
+      }
+    }
     if (!this.cfg.alerts.unusual) return;
     for (const o of b.orders) {
       const stat = this.baselineSpread.z(o.id, o.spreadPct);

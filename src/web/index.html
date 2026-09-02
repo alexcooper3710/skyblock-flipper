@@ -54,10 +54,12 @@
   <section class="panel">
     <div class="phead"><span class="t">Bazaar</span>
       <div class="seg" id="bz-mode">
-        <button class="on" data-m="orders">orders</button>
+        <button class="on" data-m="orders">flips</button>
         <button data-m="crafts">crafts</button>
+        <button data-m="browse">book</button>
       </div>
     </div>
+    <input id="bz-search" placeholder="filter the book…" autocomplete="off" spellcheck="false" style="display:none">
     <div class="pbody" id="bazaar"><div class="empty">Bazaar refreshes every 60s…</div></div>
   </section>
 
@@ -65,7 +67,8 @@
   <section class="panel">
     <div class="phead"><span class="t">Market</span>
       <div class="seg" id="ov-mode">
-        <button class="on" data-m="movers">movers</button>
+        <button class="on" data-m="movers">ah movers</button>
+        <button data-m="bz">bz movers</button>
         <button data-m="volume">volume</button>
         <button data-m="spreads">spreads</button>
       </div>

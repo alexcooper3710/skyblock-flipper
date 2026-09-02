@@ -18,6 +18,15 @@ for (let i = 120; i >= 0; i--) {
   store.writeSnapshot({ ts, totalAuctions: 45000, binCount: 30000, newBins: 5, cycleMs: 1500 },
     new Map([['GHOST_BOOTS', [price, price * 1.1, price * 1.2]], ['HYPERION', [900e6, 950e6]]]));
   if (i % 5 === 0) store.writeSales([{ auctionId: `s${i}`, key: 'GHOST_BOOTS', price, at: ts }]);
+  store.writeBazaar(ts, new Map([
+    ['ENCHANTED_DIAMOND', { buyOrder: 1300 - i, sellOrder: 1450 - i, instantBuy: 1460, instantSell: 1290, buyVolWeek: 520000, sellVolWeek: 610000 }],
+    ['ENCHANTED_LAPIS_LAZULI', { buyOrder: 800 + i, sellOrder: 880 + i, instantBuy: 890, instantSell: 790, buyVolWeek: 90000, sellVolWeek: 120000 }],
+  ]));
+}
+// DIAMOND exists on both markets, so search must fold it into one 'both' row
+for (let i = 20; i >= 0; i--) {
+  store.writeSnapshot({ ts: now - i * 60000, totalAuctions: 1, binCount: 1, newBins: 0, cycleMs: 1 },
+    new Map([['ENCHANTED_DIAMOND', [1500, 1600, 2]]]));
 }
 
 const collector = new EventEmitter();
@@ -53,15 +62,42 @@ server.listen(0, '127.0.0.1', async () => {
 
     r = await get('/api/search?q=GHOST');
     j = JSON.parse(r.body);
-    assert.strictEqual(j.results[0].key, 'GHOST_BOOTS');
-    console.log('PASS /api/search');
+    assert.strictEqual(j.results[0].id, 'GHOST_BOOTS');
+    assert.strictEqual(j.results[0].kind, 'ah');
+    console.log('PASS /api/search finds AH items');
+
+    // the bug this suite exists to prevent: bazaar-only products being invisible
+    r = await get('/api/search?q=LAPIS');
+    j = JSON.parse(r.body);
+    assert.strictEqual(j.results.length, 1, 'bazaar-only product must be searchable');
+    assert.strictEqual(j.results[0].kind, 'bz');
+    console.log('PASS /api/search finds bazaar-only products', JSON.stringify(j.results[0]));
+
+    r = await get('/api/search?q=DIAMOND');
+    j = JSON.parse(r.body);
+    assert.strictEqual(j.results[0].kind, 'both', 'an item on both markets should be tagged both');
+    console.log('PASS /api/search tags dual-market items');
+
+    r = await get('/api/bazaar?q=ENCHANTED');
+    j = JSON.parse(r.body);
+    assert.ok(j.rows.length >= 2, 'book should list every product, not just flip candidates');
+    assert.ok(j.rows[0].spreadPct > 0);
+    console.log('PASS /api/bazaar browse', JSON.stringify({ rows: j.rows.length, top: j.rows[0].id }));
+
+    r = await get('/api/item?key=ENCHANTED_LAPIS_LAZULI&range=24h');
+    j = JSON.parse(r.body);
+    assert.strictEqual(j.kind, 'bz');
+    assert.ok(j.bzCurrent, 'a bazaar item must return bazaar state, not an empty hero');
+    assert.ok(j.bazaar.length > 0, 'bazaar price history should come back');
+    console.log('PASS /api/item on a bazaar-only product', JSON.stringify({ kind: j.kind, sell: j.bzCurrent.sell_order, buckets: j.bazaar.length }));
 
     r = await get('/api/overview?since=' + (3 * 3600e3));
     j = JSON.parse(r.body);
     const gb = j.movers.find(m => m.key === 'GHOST_BOOTS');
     assert.ok(gb, 'mover should be listed');
     assert.ok(gb.pct > 0, 'price rose over the window, pct should be positive');
-    console.log('PASS /api/overview', JSON.stringify({ movers: j.movers.length, topPct: gb.pct.toFixed(1), volume: j.volume.length }));
+    assert.ok(j.bzMovers && j.bzMovers.length, 'overview must include bazaar movers');
+    console.log('PASS /api/overview', JSON.stringify({ movers: j.movers.length, bzMovers: j.bzMovers.length, topPct: gb.pct.toFixed(1) }));
 
     r = await get('/api/item?key=NOPE&range=1h');
     assert.strictEqual(r.status, 200);
