@@ -24,8 +24,24 @@ function json(res, code, body) {
   res.end(s);
 }
 
+// Reads are open so anyone you share the URL with just sees the terminal.
+// Writes (watchlist edits, marking alerts read, and especially purge, which
+// deletes the entire history) are another matter: once this is bound to
+// anything but loopback, they need the token.
+function isLoopback(req) {
+  const a = req.socket.remoteAddress || '';
+  return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
+}
+
 function createServer({ store, collector, cfg }) {
   const clients = new Set();
+
+  const mayWrite = (req, u) => {
+    if (isLoopback(req)) return true;
+    if (!cfg.token) return false;
+    const given = req.headers['x-terminal-token'] || u.searchParams.get('t');
+    return given === cfg.token;
+  };
 
   const broadcast = (event, data) => {
     const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -65,6 +81,7 @@ function createServer({ store, collector, cfg }) {
         alerts: store.all('SELECT * FROM alerts ORDER BY ts DESC LIMIT 60'),
         watchlist: store.all('SELECT * FROM watchlist ORDER BY added_ts DESC'),
         db: store.stats(),
+        canWrite: mayWrite(res.req || req, u),
         cfg: { alerts: cfg.alerts, minProfit: cfg.minProfit, maxBudget: cfg.maxBudget },
       });
     }
@@ -150,6 +167,10 @@ function createServer({ store, collector, cfg }) {
     }
 
     // --- watchlist ----------------------------------------------------------
+    if (p.startsWith('/api/') && req.method !== 'GET' && !mayWrite(req, u)) {
+      return json(res, 403, { error: 'read-only from this address - writes need the terminal token' });
+    }
+
     if (p === '/api/watchlist' && req.method === 'POST') {
       let body = '';
       req.on('data', c => { body += c; if (body.length > 1e5) req.destroy(); });

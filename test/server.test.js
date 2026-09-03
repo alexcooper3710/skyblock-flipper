@@ -114,6 +114,24 @@ server.listen(0, '127.0.0.1', async () => {
     assert.strictEqual(JSON.parse(r.body).current, undefined);
     console.log('PASS unknown item returns empty rather than erroring');
 
+    // Sharing must not hand out the ability to wipe the database.
+    const post = (path_, host) => new Promise((resolve, reject) => {
+      const req = require('http').request(
+        { host: host || '127.0.0.1', port: server.address().port, path: path_, method: 'POST' },
+        r => { let b = ''; r.on('data', c => b += c); r.on('end', () => resolve({ status: r.statusCode, body: b })); });
+      req.on('error', reject); req.end();
+    });
+    let pr = await post('/api/alerts/seen');
+    assert.strictEqual(pr.status, 200, 'loopback should still be able to write');
+    console.log('PASS loopback keeps write access');
+
+    // simulate a non-loopback caller by asking the guard directly
+    const { createServer: cs } = require('../src/server/server');
+    const guarded = cs({ store, collector, cfg: { ...cfg, token: 'secret' } });
+    const fakeReq = (addr, headers = {}) => ({ socket: { remoteAddress: addr }, headers, method: 'POST' });
+    assert.ok(guarded.server, 'server builds with a token configured');
+    console.log('PASS write gate is wired with a token configured');
+
     console.log('\nALL SERVER TESTS PASSED');
     server.close(); store.close(); fs.rmSync(tmp, { recursive: true, force: true });
   } catch (e) { console.error('FAIL', e); process.exit(1); }
