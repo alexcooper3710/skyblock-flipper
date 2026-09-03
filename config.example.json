@@ -15,8 +15,17 @@
   "bazaar": {
     "minWeeklyVolume": 200000,
     "minSpreadPct": 6,
-    "minProfitPerFlip": 100000
+    "minProfitPerFlip": 100000,
+    "taxPct": 1.25
   },
-  "blacklistIds": ["SKYBLOCK_MENU"],
-  "sound": true
+  "blacklistIds": [
+    "SKYBLOCK_MENU"
+  ],
+  "sound": true,
+  "alerts": {
+    "flipProfit": 2000000,
+    "unusual": true,
+    "unusualZ": 4,
+    "cooldownMs": 900000
+  }
 }

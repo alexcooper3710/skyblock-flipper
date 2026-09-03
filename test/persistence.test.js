@@ -61,5 +61,28 @@ assert.strictEqual(f3.loadBook(), 0);
 assert.ok(logs.includes('warn'), 'a corrupt book should warn, not throw');
 console.log('PASS corrupt file on disk starts cold with a warning');
 
+// --- alert noise guards, from what live data actually threw up --------------
+const { Baseline } = require('../src/server/collector');
+
+// A near-static item: tiny absolute wobble, huge sigma if you don't guard it.
+const flat = new Baseline(60);
+for (let i = 0; i < 30; i++) flat.push('FROGGLES_SILVER', 949000 + (i % 2));
+assert.strictEqual(flat.z('FROGGLES_SILVER', 949500), null,
+  'a sub-1% wobble on a static item must not read as a spike');
+console.log('PASS near-zero variance no longer produces phantom sigmas');
+
+// A genuinely volatile item that genuinely moved should still fire.
+const real = new Baseline(60);
+for (let i = 0; i < 30; i++) real.push('HYPERION', 900e6 + Math.sin(i) * 40e6);
+const hit = real.z('HYPERION', 500e6);
+assert.ok(hit && hit.z < -2, 'a real 44% crash on a volatile item must still alert');
+console.log('PASS real moves still alert:', JSON.stringify({ z: +hit.z.toFixed(1) }));
+
+// A big move on a quiet item is still reported - the guard is on noise, not size.
+const quiet = new Baseline(60);
+for (let i = 0; i < 30; i++) quiet.push('X', 1000 + (i % 7) * 12);
+assert.ok(quiet.z('X', 2000), 'a doubling must not be filtered out');
+console.log('PASS large moves survive the guards');
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log('\nALL PERSISTENCE TESTS PASSED');

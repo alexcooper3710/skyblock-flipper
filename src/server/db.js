@@ -88,6 +88,7 @@ class Store {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
     this.db.exec(SCHEMA);
+    this.migrate();
     this.stmt = {
       snapshot: this.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (?,?,?,?,?)'),
       bin: this.db.prepare('INSERT OR REPLACE INTO bin_history VALUES (?,?,?,?,?)'),
@@ -98,6 +99,22 @@ class Store {
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`),
       alert: this.db.prepare('INSERT INTO alerts (ts,kind,key,title,detail) VALUES (?,?,?,?,?)'),
     };
+  }
+
+  // buy_order/sell_order were written inverted until the bid/ask fix, so every
+  // stored bazaar row has the two columns the wrong way round. Swap them once.
+  migrate() {
+    const v = this.one('PRAGMA user_version');
+    const cur = v ? Object.values(v)[0] : 0;
+    if (cur >= 1) return;
+    const n = this.one('SELECT COUNT(*) AS n FROM bz_history');
+    if (n && n.n) {
+      this.db.exec(`
+        UPDATE bz_history
+        SET buy_order = sell_order, sell_order = buy_order
+        WHERE sell_order < buy_order`);
+    }
+    this.db.exec('PRAGMA user_version = 1');
   }
 
   tx(fn) {

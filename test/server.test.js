@@ -16,7 +16,13 @@ for (let i = 120; i >= 0; i--) {
   const ts = now - i * 60000;
   const price = 10000000 - i * 20000;
   store.writeSnapshot({ ts, totalAuctions: 45000, binCount: 30000, newBins: 5, cycleMs: 1500 },
-    new Map([['GHOST_BOOTS', [price, price * 1.1, price * 1.2]], ['HYPERION', [900e6, 950e6]]]));
+    new Map([
+      ['GHOST_BOOTS', [price, price * 1.1, price * 1.2, price * 1.3, price * 1.4]],
+      ['HYPERION', [900e6, 950e6]],
+      // one listing only, swinging wildly - the exact shape that produced
+      // "MINER_OUTFIT_BOOTS 130k -> 10.00m, +7592%" on live data
+      ['THIN_JUNK', [i % 2 === 0 ? 130000 : 10000000]],
+    ]));
   if (i % 5 === 0) store.writeSales([{ auctionId: `s${i}`, key: 'GHOST_BOOTS', price, at: ts }]);
   store.writeBazaar(ts, new Map([
     ['ENCHANTED_DIAMOND', { buyOrder: 1300 - i, sellOrder: 1450 - i, instantBuy: 1460, instantSell: 1290, buyVolWeek: 520000, sellVolWeek: 610000 }],
@@ -97,6 +103,10 @@ server.listen(0, '127.0.0.1', async () => {
     assert.ok(gb, 'mover should be listed');
     assert.ok(gb.pct > 0, 'price rose over the window, pct should be positive');
     assert.ok(j.bzMovers && j.bzMovers.length, 'overview must include bazaar movers');
+    assert.ok(!j.movers.some(m => m.key === 'THIN_JUNK'),
+      'a single-listing item must not be reported as a mover - that is just the cheapest listing selling');
+    assert.ok(j.movers.every(m => m.depth >= 4), 'every mover should have a real wall behind it');
+    console.log('PASS shallow-wall movers are excluded');
     console.log('PASS /api/overview', JSON.stringify({ movers: j.movers.length, bzMovers: j.bzMovers.length, topPct: gb.pct.toFixed(1) }));
 
     r = await get('/api/item?key=NOPE&range=1h');
