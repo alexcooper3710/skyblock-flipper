@@ -256,25 +256,40 @@ const routes = {
 
   '/api/tickers': async () => {
     const since = Date.now() - 6 * 3600e3;
-    const rows = [];
-    for (const w of await watchRows()) {
-      const ah = await store.range('bin', w.key, since);
-      const bz = ah.length ? [] : await store.range('bz', w.key, since);
-      const series = ah.length ? ah.map(r => [r.ts, r.lowest]) : bz.map(r => [r.ts, r.sell_order]);
+    const watched = await watchRows();
+    const rows = await Promise.all(watched.map(async (w) => {
+      const isBz = engine.books.has(w.key);
+      const [ah, bz] = await Promise.all([
+        store.range('bin', w.key, since),
+        isBz ? store.range('bz', w.key, since) : Promise.resolve([]),
+      ]);
+      let series = ah.length ? ah.map(r => [r.ts, r.lowest]) : bz.map(r => [r.ts, r.sell_order]);
+      let source = ah.length ? 'ah' : bz.length ? 'bz' : null;
+
+      // A sparkline needs a line. Six hours of nothing is what a tab that
+      // opened two minutes ago has, so fall back to the archive rather than
+      // drawing a watchlist of flat dashes.
+      if (series.length < 2) {
+        const hist = isBz ? await bzHistory(w.key, '24h') : await ahHistory(w.key, '24h');
+        if (hist.length > 1) {
+          series = hist.map(r => [r.t, isBz ? (r.sell || r.avg) : r.avg]).filter(p => p[1] > 0);
+          source = 'coflnet';
+        }
+      }
+
       const step = Math.max(1, Math.ceil(series.length / 48));
       const spark = series.filter((_, i) => i % step === 0);
       const first = series.length ? series[0][1] : null;
       let last = series.length ? series[series.length - 1][1] : null;
-      // A watched item with no stored history yet still has a live price.
-      if (last == null) {
-        const liveAh = engine.book.binAt(w.key, 0);
-        const liveBz = engine.books.get(w.key);
-        last = liveAh || (liveBz ? liveBz.sellOrder : null) || null;
-      }
-      rows.push({ ...w, kind: ah.length ? 'ah' : bz.length ? 'bz' : engine.books.has(w.key) ? 'bz' : 'ah',
-        price: last, first, changePct: first && last ? ((last - first) / first) * 100 : null, spark,
-        hit: last != null && ((w.below && last <= w.below) || (w.above && last >= w.above)) });
-    }
+      // Whatever the history says, the price now is the price now.
+      const liveAh = engine.book.binAt(w.key, 0);
+      const liveBz = engine.books.get(w.key);
+      const live = liveAh || (liveBz ? liveBz.sellOrder : 0);
+      if (live) last = live;
+      return { ...w, kind: isBz ? 'bz' : 'ah', source, price: last ?? null, first,
+        changePct: first && last ? ((last - first) / first) * 100 : null, spark,
+        hit: last != null && ((w.below && last <= w.below) || (w.above && last >= w.above)) };
+    }));
     return json({ tickers: rows });
   },
 

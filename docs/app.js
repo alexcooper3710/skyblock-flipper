@@ -550,8 +550,11 @@ async function renderWatchlist() {
     top.appendChild(sparkline(w.spark, { color: colour }));
     const px = el('div', 'tprice');
     px.appendChild(el('div', 'num big', w.price == null ? '—' : fmt(w.price)));
+    // Say which window the change is over. A sparkline drawn from the archive
+    // spans a day; one drawn from what this tab has collected spans six hours.
+    const win = w.source === 'coflnet' ? '24h' : '6h';
     px.appendChild(el('div', 'num sub ' + (up ? 'pos' : 'neg'),
-      w.changePct == null ? 'no data yet' : `${up ? '+' : ''}${w.changePct.toFixed(1)}% 6h`));
+      w.changePct == null ? 'no history yet' : `${up ? '+' : ''}${w.changePct.toFixed(1)}% ${win}`));
     top.appendChild(px);
     const x = el('button', 'act', '×');
     x.onclick = (e) => { e.stopPropagation(); toggleWatch(w.key); };
