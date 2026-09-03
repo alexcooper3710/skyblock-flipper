@@ -1,0 +1,34 @@
+PUBLISHING WITHOUT GIT
+======================
+
+If git is not installed, or the push keeps failing, you can put the site up by
+dragging files in a browser. No tools, no command line.
+
+1. Open:
+     https://github.com/alexcooper3710/skyblock-flipper/upload/main
+
+2. Open this project folder in Explorer alongside it.
+
+3. Drag the whole  docs  FOLDER onto that GitHub page.
+   GitHub keeps the folder structure, so you end up with docs/... in the repo.
+   (Dragging the folder matters - docs/shared/ has to come along.)
+
+4. Scroll down, click "Commit changes".
+
+5. Go to:
+     https://github.com/alexcooper3710/skyblock-flipper/settings/pages
+   Source:  Deploy from a branch
+   Branch:  main      Folder:  /docs      then Save
+
+   If that screen shows a list of workflow templates (Next.js, Jekyll, ...) then
+   the Source dropdown is set to "GitHub Actions" - change it to "Deploy from a
+   branch" and the Branch/Folder pickers appear.
+
+6. Wait about a minute, then open:
+     https://alexcooper3710.github.io/skyblock-flipper/
+
+   In Chrome, click Install in the address bar to get it as a real app with its
+   own window and taskbar icon.
+
+This uploads only the site. The source code is not pushed this way - that is
+fine, the site is the part that has to be on GitHub. We can push the rest later.
