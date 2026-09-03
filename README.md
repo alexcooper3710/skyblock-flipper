@@ -84,6 +84,14 @@ lands in both builds or neither.
 To try the browser build against the live API before publishing it:
 `npm run terminal`, then open **http://127.0.0.1:8787/pages/**.
 
+### It installs like an app
+
+Once it is on Pages, open the URL in Chrome and use **Install** (the icon in the
+address bar, or menu > Cast, save and share > Install page as app). You get a
+real window with its own taskbar icon and no browser chrome - no `.bat`, no
+terminal, no server. That is the whole point of this build: to open it, you open
+it.
+
 ### Publishing it
 
 Double-click **`publish-to-github.bat`**. It needs Git for Windows (not the
