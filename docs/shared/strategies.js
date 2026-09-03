@@ -41,6 +41,26 @@ function passes(flip, cfg) {
   return true;
 }
 
+// Does the wall above this listing actually agree with itself?
+//
+// Counting listings is the wrong test. Four listings at 10m, 12m, 13m and 14m
+// are a market; four at 10m, 40m, 300m and 900m are four people guessing, and
+// undercutting the second one is not a plan you can sell into. So the size of
+// the claim raises the bar on AGREEMENT rather than on headcount - which is
+// what lets a real 200% snipe through a five-deep wall while throwing out a
+// 200% "find" sitting under three scattered numbers.
+//
+// `wall` is the listing we price against (index 1, the one we would undercut).
+function wallIsCoherent(book, key, wall, marginPct) {
+  const third = book.binAt(key, 2);
+  if (!third) return marginPct < 50;          // nothing to corroborate with
+  if (third > wall * 1.6) return false;
+  if (marginPct < 100) return true;
+  // A big claim needs a third opinion as well as a second.
+  const fourth = book.binAt(key, 3);
+  return !!fourth && fourth <= wall * 2;
+}
+
 // 1. Lowest-BIN snipe. No history required - just "this is under the wall".
 // Priced against the SECOND lowest so the exit is realistic, and refuses to
 // fire on a one-listing wall where the "lowest BIN" is meaningless.
@@ -51,13 +71,15 @@ function lowestBinSnipe({ auction, item, keys, book, cfg }) {
   // what made the auction numbers wrong. With no wall of its own this strategy
   // has no opinion; refusing beats guessing.
   const key = keys.variant;
-  if (book.binDepth(key) < 3) return null;
+  const depth = book.binDepth(key);
+  if (depth < 3) return null;
   const wall = book.binAt(key, 1);
   if (!wall) return null;
-  return makeFlip({
+  const flip = makeFlip({
     auction, item, keys, value: wall, basis: 'bin2:variant',
-    strategy: 'lowest-bin', confidence: 0.8, samples: book.binDepth(key), cfg,
+    strategy: 'lowest-bin', confidence: 0.8, samples: depth, cfg,
   });
+  return wallIsCoherent(book, key, wall, flip.marginPct) ? flip : null;
 }
 
 // 2. Sold-median. Slower to warm up, but it prices against money that actually
@@ -67,11 +89,13 @@ function soldMedian({ auction, item, keys, book, cfg }) {
   // a blend of every configuration of the item, so only the variant's own
   // history says what THIS item sells for.
   const st = book.soldStats(keys.variant);
-  if (st.n >= cfg.minSampleSize && st.median > 0) {
-    return makeFlip({ auction, item, keys, value: st.median, basis: st.seeded ? 'sold:variant(seed)' : 'sold:variant',
-      strategy: 'sold-median', confidence: 0.95, samples: st.n, cfg });
-  }
-  return null;
+  if (st.n < cfg.minSampleSize || !(st.median > 0)) return null;
+  const flip = makeFlip({ auction, item, keys, value: st.median, basis: st.seeded ? 'sold:variant(seed)' : 'sold:variant',
+    strategy: 'sold-median', confidence: 0.95, samples: st.n, cfg });
+  // Sales are stronger evidence than listings, but a 100%+ discount off three
+  // of them is still usually one odd sale dragging the median around.
+  if (flip.marginPct >= 100 && st.n < 5) return null;
+  return flip;
 }
 
 // 3. Attribute / roll-aware. Kuudra armour and equipment are priced by their
@@ -134,4 +158,4 @@ function evaluate(ctx) {
   return best;
 }
 
-export { evaluate, lowestBinSnipe, soldMedian, attributeAware, passes, makeFlip };
+export { evaluate, lowestBinSnipe, soldMedian, attributeAware, passes, makeFlip, wallIsCoherent };

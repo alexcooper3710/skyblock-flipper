@@ -37,6 +37,25 @@ function topOfBook(product) {
     instantSell: product.quick_status ? product.quick_status.sellPrice : 0,
     buyVolWeek: product.quick_status ? product.quick_status.buyMovingWeek : 0,
     sellVolWeek: product.quick_status ? product.quick_status.sellMovingWeek : 0,
+    // How many orders actually exist, which is NOT what the ladder says.
+    // Hypixel truncates the summaries - 30 ask levels, 15 bid - so summing
+    // their `orders` undercounts badly. Checked against live COAL: the ask
+    // ladder's levels add up to 333 orders while quick_status says 648, and
+    // the bid side 138 against 180. quick_status is the real count; the
+    // ladder is a window onto the top of the book.
+    // quick_status.buyX pairs with buy_summary, which is the ASK side (the
+    // same inversion as the prices), so in the words the game uses:
+    //   sell offers = asks = quick_status.buyOrders
+    //   buy orders  = bids = quick_status.sellOrders
+    sellOffers: product.quick_status ? (product.quick_status.buyOrders || 0) : 0,
+    buyOrders: product.quick_status ? (product.quick_status.sellOrders || 0) : 0,
+    // Units resting on each side, again from quick_status rather than the
+    // truncated ladder.
+    askUnits: product.quick_status ? (product.quick_status.buyVolume || 0) : 0,
+    bidUnits: product.quick_status ? (product.quick_status.sellVolume || 0) : 0,
+    // True when the ladder is a truncated view of a deeper book.
+    askTruncated: (product.buy_summary || []).length >= LADDER_LEVELS,
+    bidTruncated: (product.sell_summary || []).length >= 15,
   };
 }
 

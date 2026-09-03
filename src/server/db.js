@@ -101,11 +101,14 @@ class Store {
     this.db = new DatabaseSync(file);
     this.db.exec(SCHEMA);
     this.migrate();
+    this.migrateOrderCounts();   // must precede prepare(): the insert names these columns
     this.stmt = {
       snapshot: this.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (?,?,?,?,?)'),
       bin: this.db.prepare('INSERT OR REPLACE INTO bin_history VALUES (?,?,?,?,?,?)'),
       sale: this.db.prepare('INSERT OR IGNORE INTO sales VALUES (?,?,?,?)'),
-      bz: this.db.prepare('INSERT OR REPLACE INTO bz_history VALUES (?,?,?,?,?,?,?,?)'),
+      bz: this.db.prepare(`INSERT OR REPLACE INTO bz_history
+        (ts,product,buy_order,sell_order,instant_buy,instant_sell,buy_vol_week,sell_vol_week,sell_offers,buy_orders,ask_units,bid_units)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`),
       depth: this.db.prepare('INSERT OR REPLACE INTO bz_depth VALUES (?,?,?,?)'),
       flip: this.db.prepare(`INSERT OR REPLACE INTO flips
         (uuid,ts,name,key_base,key_variant,price,value,profit,margin,strategy,basis,samples)
@@ -129,6 +132,16 @@ class Store {
     }
     this.db.exec('PRAGMA user_version = 1');
     this.addColumnIfMissing('bin_history', 'wall', 'TEXT');
+  }
+
+  // How many orders are really on each side. The ladder cannot answer this -
+  // Hypixel truncates it - so these come from quick_status and are worth
+  // keeping over time: order count moving without price moving is the wall
+  // being built or pulled.
+  migrateOrderCounts() {
+    for (const c of ['sell_offers', 'buy_orders', 'ask_units', 'bid_units']) {
+      this.addColumnIfMissing('bz_history', c, 'INTEGER');
+    }
   }
 
   addColumnIfMissing(table, column, type) {
@@ -162,7 +175,8 @@ class Store {
   writeBazaar(ts, books) {
     this.tx(() => {
       for (const [product, t] of books) {
-        this.stmt.bz.run(ts, product, t.buyOrder, t.sellOrder, t.instantBuy, t.instantSell, t.buyVolWeek, t.sellVolWeek);
+        this.stmt.bz.run(ts, product, t.buyOrder, t.sellOrder, t.instantBuy, t.instantSell, t.buyVolWeek, t.sellVolWeek,
+          t.sellOffers || 0, t.buyOrders || 0, t.askUnits || 0, t.bidUnits || 0);
       }
     });
   }
