@@ -62,6 +62,32 @@ npm run engine     # same engine, headless, prints to the terminal
 npm test           # offline tests against real Hypixel item_bytes
 ```
 
+## Sharing it with someone else
+
+They do **not** need an API key, Node, or anything installed. The key (if you use
+one) lives on your machine; they just open a URL.
+
+Double-click **`run-terminal-shared.bat`**. It binds to your whole network and
+prints the URLs to hand out:
+
+```
+  Share these with anyone on your network - no API key needed their end:
+    http://192.168.1.24:8787
+```
+
+Windows will ask to allow Node through the firewall the first time - say yes for
+**Private** networks only.
+
+Guests get a **read-only** view: every panel, every chart, live updates. Writes
+(watchlist edits, marking alerts read, and `/api/purge`, which deletes your whole
+history) are refused from any address but your own machine unless they carry the
+edit token the launcher prints. That token is generated once and saved, so you
+can edit from your own phone with `?t=<token>` while everyone else just watches.
+
+Outside your house, don't port-forward this - there's no login on it. Put both
+machines on [Tailscale](https://tailscale.com) and share the Tailscale IP; it
+behaves exactly like the LAN case.
+
 ### The API key
 
 The auction and bazaar endpoints are public - the terminal works with no key at
