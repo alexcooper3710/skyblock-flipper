@@ -61,6 +61,24 @@ function lanAddresses() {
 
 collector.on('log', l => console.log(`[${l.level}] ${l.msg}`));
 
+// Without this the second instance dies on EADDRINUSE while the FIRST one keeps
+// serving - so restarting appears to do nothing and the stale-build banner never
+// goes away. Say exactly what happened and how to end it.
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error('');
+    console.error(`  Port ${PORT} is already in use - an older copy of the terminal is still running.`);
+    console.error('  That old copy is what your browser is talking to, which is why restarting');
+    console.error('  seemed to change nothing.');
+    console.error('');
+    console.error('  Fix it with:   stop-terminal.bat      (or run run-terminal.bat, which now does this for you)');
+    console.error('');
+    process.exit(1);
+  }
+  console.error('server error:', e.message);
+  process.exit(1);
+});
+
 server.listen(PORT, HOST, () => {
   const size = (store.stats().bytes / 1048576).toFixed(1);
   console.log('');
