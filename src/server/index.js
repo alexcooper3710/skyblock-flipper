@@ -4,6 +4,7 @@ process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '16';
 
 const path = require('path');
 const os = require('os');
+const fs = require('fs');
 const { Store } = require('./db');
 const { Collector } = require('./collector');
 const { createServer } = require('./server');
@@ -16,7 +17,19 @@ cfg.apiKey = process.env.HYPIXEL_API_KEY || cfg.apiKey || '';
 cfg.alerts = Object.assign({ flipProfit: 2000000, unusual: true, unusualZ: 4, cooldownMs: 15 * 60000 }, cfg.alerts);
 // Keep the database alongside the project rather than in the home directory:
 // it stays with the checkout, it is easy to find, and it is inspectable.
-const dataDir = cfg.dataDir || path.join(__dirname, '..', '..', 'data');
+// But an earlier build wrote to the home directory, and quietly starting from an
+// empty database would throw away everything collected so far - so if the old
+// one exists and the new one does not, keep using the old one.
+const legacyDir = path.join(os.homedir(), '.skyblock-flipper');
+const projectDir = path.join(__dirname, '..', '..', 'data');
+let dataDir = cfg.dataDir || projectDir;
+let adopted = false;
+if (!cfg.dataDir
+    && !fs.existsSync(path.join(projectDir, 'market.db'))
+    && fs.existsSync(path.join(legacyDir, 'market.db'))) {
+  dataDir = legacyDir;
+  adopted = true;
+}
 cfg.persistPath = path.join(dataDir, 'price-book.json');
 
 const store = new Store(path.join(dataDir, 'market.db'));
@@ -53,7 +66,7 @@ server.listen(PORT, HOST, () => {
   console.log('');
   console.log('  SkyBlock Terminal');
   console.log(`  http://${HOST}:${PORT}`);
-  console.log(`  data: ${dataDir}  (${size} MB)`);
+  console.log(`  data: ${dataDir}  (${size} MB)${adopted ? '  [kept your existing history]' : ''}`);
   console.log(`  api:  ${cfg.apiKey ? 'key loaded' : 'no key (public endpoints - fine, just lower rate limits)'}`);
   if (HOST === '0.0.0.0') {
     console.log('');

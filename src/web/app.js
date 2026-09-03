@@ -1,4 +1,8 @@
 'use strict';
+// Must match API_VERSION in src/server/server.js. If the running server is
+// older, say so loudly instead of rendering blank panels.
+const API_VERSION = 3;
+
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, txt) => { const n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; };
 
@@ -623,6 +627,20 @@ $('search').addEventListener('input', (e) => {
 });
 document.addEventListener('click', (e) => { if (!e.target.closest('#search,#drop')) $('drop').style.display = 'none'; });
 window.addEventListener('resize', () => { if (state.item) selectItem(state.item, $('item-title').textContent); });
+
+// Before anything else: is the process we are talking to the build these files
+// belong to? Dropping new files over a running server is easy to do by accident.
+(async () => {
+  let v = null;
+  try { const r = await fetch('/api/version'); if (r.ok) v = await r.json(); } catch { /* old build */ }
+  if (v && v.api === API_VERSION) return;
+  const bar = document.createElement('div');
+  bar.id = 'stale';
+  bar.textContent = v
+    ? `This page expects API v${API_VERSION} but the running server is v${v.api}. Close the terminal window and run run-terminal.bat again.`
+    : 'The running server is an older build than these files. Close the terminal window and run run-terminal.bat again.';
+  document.body.prepend(bar);
+})();
 
 // first paint
 fetch('/api/state').then(r => r.json()).then(s => {

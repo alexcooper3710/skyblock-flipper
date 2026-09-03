@@ -7,6 +7,12 @@ const path = require('path');
 const { URL } = require('url');
 
 const WEB = path.join(__dirname, '..', 'web');
+
+// Bumped whenever the API surface changes. Static files are read from disk per
+// request, but the server code is loaded into memory at startup - so dropping a
+// new build over a running process leaves a new front end talking to an old back
+// end, which shows up as silently empty panels. The client checks this.
+const API_VERSION = 3;
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
 const RANGES = {
@@ -39,6 +45,8 @@ function isLoopback(req) {
   const a = req.socket.remoteAddress || '';
   return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
 }
+
+const START = Date.now();
 
 function createServer({ store, collector, cfg }) {
   const clients = new Set();
@@ -94,6 +102,10 @@ function createServer({ store, collector, cfg }) {
     }
 
     if (p === '/api/db') return json(res, 200, store.stats());
+
+    if (p === '/api/version') {
+      return json(res, 200, { api: API_VERSION, startedAt: START, pid: process.pid });
+    }
 
     // --- item detail --------------------------------------------------------
     if (p === '/api/item') {
@@ -259,7 +271,10 @@ function createServer({ store, collector, cfg }) {
     if (!full.startsWith(WEB)) return json(res, 403, { error: 'nope' });
     fs.readFile(full, (err, buf) => {
       if (err) return json(res, 404, { error: 'not found' });
-      res.writeHead(200, { 'content-type': TYPES[path.extname(full)] || 'application/octet-stream' });
+      res.writeHead(200, {
+        'content-type': TYPES[path.extname(full)] || 'application/octet-stream',
+        'cache-control': 'no-cache',
+      });
       res.end(buf);
     });
   });
