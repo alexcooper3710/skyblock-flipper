@@ -22,6 +22,7 @@ const { readItem, pricingKeys } = await import(path.join(ROOT, 'docs/shared/item
 const { PriceBook } = await import(path.join(ROOT, 'docs/shared/pricing.js'));
 const { evaluate } = await import(path.join(ROOT, 'docs/shared/strategies.js'));
 const { topOfBook, orderFlips, craftFlips } = await import(path.join(ROOT, 'docs/shared/bazaar.js'));
+const { coflTag: coflTagOf } = await import(path.join(ROOT, 'docs/cofl.js'));
 
 const OUT = path.join(ROOT, 'out');
 const PREV = path.join(ROOT, 'prev');
@@ -176,7 +177,29 @@ async function pollSold(book, seen) {
     const st = book.soldStats(k);
     if (st.n >= 2 && st.median > 0) sold[k] = [Math.round(st.median), st.n];
   }
-  log(`seed: ${Object.keys(wall).length} wall keys, ${Object.keys(sold).length} sold keys`);
+
+  // What each item normally goes for, from Coflnet's public archive. Hypixel
+  // serves no history at all, so this is the only way a page that just opened
+  // can say "this usually sells for X". Baked in here so the tab does not have
+  // to make a few hundred cross-origin requests on load.
+  //
+  // Per item ID, so it knows nothing about enchants or stars: it is context and
+  // a sanity ceiling, never a price. Fetching it here also means a Coflnet
+  // outage degrades the seed instead of breaking the page.
+  const ref = {};
+  const refTags = [...new Set(flips.map(f => coflTagOf(f.keyBase)).filter(Boolean))].slice(0, 400);
+  let refFails = 0;
+  await mapPool(refTags, 4, async (tag) => {
+    try {
+      const r = await fetch(`https://sky.coflnet.com/api/item/price/${tag}`);
+      if (!r.ok) { refFails++; return; }
+      const a = await r.json();
+      if (a && (a.median > 0 || a.mean > 0)) {
+        ref[tag] = [Math.round(a.median || 0), Math.round(a.mean || 0), Math.round(a.max || 0), Math.round(a.volume || 0)];
+      }
+    } catch { refFails++; }
+  });
+  log(`seed: ${Object.keys(wall).length} wall keys, ${Object.keys(sold).length} sold keys, ${Object.keys(ref).length}/${refTags.length} reference prices (${refFails} failed)`);
 
   const ts = Date.now();
   const meta = {
@@ -184,6 +207,7 @@ async function pollSold(book, seen) {
     totalAuctions: auctions.length, binCount: bins.length, decoded: keyed.size,
     flips: flips.length, boardSize: board.length,
     wallKeys: Object.keys(wall).length, soldKeys: Object.keys(sold).length,
+    refKeys: Object.keys(ref).length,
     bazaarProducts: Object.keys(products).length,
     snapshotAt: head.lastUpdated, cfg: CFG,
   };
@@ -195,7 +219,7 @@ async function pollSold(book, seen) {
   };
   await write('meta.json', meta);
   await write('bazaar.json', { ts, products, orders: orderFlips(bz.products, CFG).slice(0, 60), crafts: craftFlips(bz.products, CFG).slice(0, 60) });
-  await write('ah.json', { ts, flips, wall, sold });
+  await write('ah.json', { ts, flips, wall, sold, ref });
   await write('sold-raw.json', book.serialize());
 
   log(`done in ${((Date.now() - t0) / 1000).toFixed(1)}s`);

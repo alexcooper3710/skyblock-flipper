@@ -17,6 +17,7 @@ window.__TERMINAL_LOCAL__ = true;
 
 import { Store } from './store.js';
 import { Engine, CONFIG } from './engine.js';
+import { ahHistory, bzHistory, aggregate, coflTag } from './cofl.js';
 
 // ---------------------------------------------------------------------------
 // Synchronous section.  Everything above the first await.
@@ -100,26 +101,78 @@ const routes = {
 
   '/api/item': async (u) => {
     const key = u.searchParams.get('key');
-    const r = RANGES[u.searchParams.get('range') || '24h'] || RANGES['24h'];
+    const range = u.searchParams.get('range') || '24h';
+    const r = RANGES[range] || RANGES['24h'];
     const since = r.ms === Infinity ? 0 : Date.now() - r.ms;
-    const bin = await store.range('bin', key, since);
-    const sales = await store.range('sales', key, since, 'byKeyTs');
-    const bzRows = await store.range('bz', key, since);
+
+    // Our own history only goes back to whenever this tab first opened, which
+    // for a fresh tab is nothing at all. Coflnet's archive fills in the past.
+    const [bin, sales, bzRows, cAh, cBz, ref] = await Promise.all([
+      store.range('bin', key, since),
+      store.range('sales', key, since, 'byKeyTs'),
+      store.range('bz', key, since),
+      ahHistory(key, range),
+      engine.books.has(key) ? bzHistory(key, range) : Promise.resolve([]),
+      aggregate(key),
+    ]);
+
     const live = engine.books.get(key);
     const latestBz = bzRows.length ? bzRows[bzRows.length - 1] : null;
     const current = bin.length ? bin[bin.length - 1] : null;
     // The live wall beats stored history for "what is it right now" - a tab
     // opened ten seconds ago has a full wall in memory and nothing on disk.
     const liveWall = engine.book.lowestBin.get(key);
+
+    // Ours wins where we have it; theirs covers everything before that.
+    const splice = (theirs, ours) => {
+      if (!theirs.length) return ours;
+      if (!ours.length) return theirs.filter(x => x.t >= since);
+      const from = ours[0].t;
+      return theirs.filter(x => x.t < from && x.t >= since).concat(ours);
+    };
+
+    const binLocal = Store.bucket(bin, r.bucket, x => x.lowest);
+    const salesLocal = Store.bucket(sales, r.bucket, x => x.price);
+
+    // Bucket the two sides of the bazaar separately. Taking low/avg of one
+    // series and labelling them "buy" and "sell" was drawing a spread that
+    // never existed.
+    const bzLocal = (() => {
+      const m = new Map();
+      for (const row of bzRows) {
+        const t = Math.floor(row.ts / r.bucket) * r.bucket;
+        let b = m.get(t);
+        if (!b) m.set(t, (b = { t, nb: 0, ns: 0, buy: 0, sell: 0 }));
+        if (row.buy_order) { b.buy += row.buy_order; b.nb++; }
+        if (row.sell_order) { b.sell += row.sell_order; b.ns++; }
+      }
+      return [...m.values()].sort((a, b) => a.t - b.t)
+        .map(b => ({ t: b.t, buy: b.nb ? b.buy / b.nb : 0, sell: b.ns ? b.sell / b.ns : 0 }));
+    })();
+
+    const binSeries = splice(cAh.map(x => ({ t: x.t, n: x.n, avg: x.avg, low: x.low, high: x.high })), binLocal);
+    const salesSeries = splice(cAh.map(x => ({ t: x.t, n: x.n, avg: x.avg, low: x.low, high: x.high })), salesLocal);
+    const bzSeries = splice(cBz, bzLocal);
+
     return json({
       key,
-      kind: (current || liveWall) && latestBz ? 'both' : latestBz && !liveWall ? 'bz' : 'ah',
+      kind: (current || liveWall || binSeries.length) && (latestBz || live) ? 'both'
+        : (latestBz || live) && !liveWall ? 'bz' : 'ah',
       current,
-      bzCurrent: latestBz || (live ? { ts: engine.lastBazaar.at, buy_order: live.buyOrder, sell_order: live.sellOrder } : null),
-      bin: Store.bucket(bin, r.bucket, x => x.lowest),
-      sales: Store.bucket(sales, r.bucket, x => x.price),
-      bazaar: Store.bucket(bzRows, r.bucket, x => x.sell_order).map(b => ({ ...b, buy: b.low, sell: b.avg })),
+      bzCurrent: latestBz || (live ? { ts: engine.lastBazaar.at, buy_order: live.buyOrder, sell_order: live.sellOrder,
+        instant_buy: live.instantBuy, instant_sell: live.instantSell, buy_vol_week: live.buyVolWeek, sell_vol_week: live.sellVolWeek } : null),
+      bin: binSeries,
+      sales: salesSeries,
+      bazaar: bzSeries,
       recentSales: sales.slice(-40).reverse(),
+      // What the item normally goes for, across every configuration of it.
+      // Context only - it knows nothing about enchants, stars or attributes.
+      ref: ref ? { ...ref, source: 'coflnet' } : null,
+      history: {
+        ah: cAh.length ? (binLocal.length ? 'coflnet+local' : 'coflnet') : (binLocal.length ? 'local' : 'none'),
+        bz: cBz.length ? (bzLocal.length ? 'coflnet+local' : 'coflnet') : (bzLocal.length ? 'local' : 'none'),
+        tag: coflTag(key),
+      },
       wall: liveWall
         ? { ts: engine.lastUpdated, depth: liveWall.length, prices: liveWall }
         : current ? { ts: current.ts, depth: current.depth, prices: current.wall || [] } : null,

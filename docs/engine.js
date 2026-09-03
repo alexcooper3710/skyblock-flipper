@@ -7,6 +7,7 @@ import { PriceBook } from './shared/pricing.js';
 import { evaluate } from './shared/strategies.js';
 import { orderFlips, craftFlips, topOfBook } from './shared/bazaar.js';
 import { Store } from './store.js';
+import { aggregate, coflTag } from './cofl.js';
 
 const BASE = 'https://api.hypixel.net/v2';
 const SNAPSHOT_MS = 60000, LEAD_MS = 800, PROBE_MS = 250, MAX_PROBE_MS = 20000;
@@ -73,6 +74,8 @@ export class Engine extends EventTarget {
     this.flipFirstSeen = new Map();   // uuid -> when this board first showed it
     this.startedAt = Date.now();
     this.seedMeta = null;
+    this.firstBoardAt = 0;
+    this.refCache = new Map();   // cofl tag -> typical price, from the collector seed
     this.lastBazaar = { orders: [], crafts: [], at: 0 };
     this.watch = new Map();
   }
@@ -81,14 +84,16 @@ export class Engine extends EventTarget {
   // explanation is the single worst state this thing can be in.
   phase() {
     if (!this.running) return { code: 'stopped', label: 'stopped' };
-    if (this.stats.snapshots === 0) {
+    if (!this.firstBoardAt) {
       const s = Math.round((Date.now() - this.startedAt) / 1000);
       const m = this.seedMeta;
       if (m && !m.error) {
         return { code: 'seed', elapsed: s, ageMin: m.ageMin,
           label: `showing the ${m.ageMin < 1 ? 'latest' : m.ageMin + 'm old'} collector snapshot · live snapshot in progress ${s}s` };
       }
-      return { code: 'first-snapshot', label: `pulling the first auction snapshot… ${s}s`, elapsed: s };
+      const stage = this.stats.snapshots === 0 ? 'pulling the first auction snapshot'
+        : `decoding ${this.stats.decodes.toLocaleString()} of ~${this.stats.totalAuctions.toLocaleString()} listings`;
+      return { code: 'first-snapshot', label: `${stage}… ${s}s`, elapsed: s };
     }
     return { code: 'live', label: 'live', elapsed: 0 };
   }
@@ -123,6 +128,10 @@ export class Engine extends EventTarget {
       }
 
       if (ah) {
+        // [median, mean, max, volume] per item tag, precomputed by the collector.
+        for (const [tag, v] of Object.entries(ah.ref || {})) {
+          this.refCache.set(tag, { median: v[0], mean: v[1], max: v[2], volume: v[3] });
+        }
         const wallKeys = this.book.seedWall(ah.wall);
         const soldKeys = this.book.seedSold(ah.sold, meta.ts);
         this.recentFlips = (ah.flips || []).map(f => ({ ...f, seed: true, isNew: false }));
@@ -154,7 +163,7 @@ export class Engine extends EventTarget {
     await this.loadSeed();
     this.loopAuctions(); this.loopSold(); this.loopBazaar();
     const beat = setInterval(() => {
-      if (!this.running || this.stats.snapshots > 0) return clearInterval(beat);
+      if (!this.running || this.firstBoardAt) return clearInterval(beat);
       this.emit('stats', { ...this.stats, book: this.book.stats(), warmedUp: this.warmedUp, phase: this.phase() });
     }, 1000);
   }
@@ -278,6 +287,47 @@ export class Engine extends EventTarget {
           `buy ${f.price} / worth ${f.value} · ${f.marginPct}% · ${f.strategy}`);
       }
     }
+    this.firstBoardAt = this.firstBoardAt || Date.now();
+    this.emit('flips', this.recentFlips);
+    // Cross-check against what these items have actually been selling for, and
+    // re-emit if anything got struck off. Deliberately after the emit: the board
+    // should not wait on a third party to appear.
+    this.sanityCheck().catch(() => {});
+  }
+
+  // Coflnet's aggregates are per item ID and know nothing about enchantments or
+  // stars, so they can never PRICE anything here. What they can do is catch the
+  // opposite error: a "flip" claiming a resale far beyond anything that item has
+  // ever fetched is a key collision, not a find. That is a veto, not a valuation,
+  // and a veto is safe to take from a coarser source.
+  async sanityCheck() {
+    const board = this.recentFlips;
+    if (!board.length) return;
+    const tags = new Map(this.refCache);
+    // Only ask for what the seed did not already carry.
+    const missing = [...new Set(board.slice(0, 100).map(f => coflTag(f.keyBase)).filter(Boolean))]
+      .filter(t => !tags.has(t));
+    await Promise.all(missing.map(async (t) => { const a = await aggregate(t); if (a) tags.set(t, a); }));
+    if (!tags.size) return;
+
+    let dropped = 0;
+    const kept = [];
+    for (const f of board) {
+      const a = tags.get(coflTag(f.keyBase));
+      if (!a) { kept.push(f); continue; }
+      f.ref = { median: Math.round(a.median || 0), mean: Math.round(a.mean || 0), max: Math.round(a.max || 0), volume: a.volume };
+      const normal = Math.max(a.median || 0, a.mean || 0);
+      // Generous on purpose - a god-rolled copy really can be worth several
+      // times the blended median, so only the indefensible gets cut.
+      const ceiling = Math.max(normal * 5, (a.max || 0) * 1.2);
+      if (ceiling > 0 && f.value > ceiling) { dropped++; continue; }
+      kept.push(f);
+    }
+    if (!dropped && !tags.size) return;
+    this.recentFlips = kept;
+    this.stats.boardSize = kept.length;
+    this.stats.vetoed = (this.stats.vetoed || 0) + dropped;
+    if (dropped) this.log('info', `sanity check: dropped ${dropped} flip(s) priced above anything that item has sold for`);
     this.emit('flips', this.recentFlips);
   }
 
