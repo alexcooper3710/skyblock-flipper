@@ -24,6 +24,16 @@ So you see a snapshot within about a second of it existing, every minute, instea
 of 30–60 seconds late. **The ceiling is the API's own refresh rate** — no client
 can beat that, and anyone claiming otherwise is selling something.
 
+## Where things live
+
+The project folder can sit anywhere convenient - the Desktop is fine. The
+**database does not go with it**: on Windows it is written to
+`%LOCALAPPDATA%\SkyBlockTerminal`. Desktops are frequently synced by OneDrive,
+and a live SQLite file inside a syncing folder risks corruption - quite apart
+from pushing roughly a gigabyte a day into someone's cloud storage. An existing
+`data/` folder or an older home-directory database is picked up rather than
+abandoned; the startup banner prints which one it chose.
+
 ## Two ways to run it
 
 **The terminal** (recommended) - a local server you open in a browser:

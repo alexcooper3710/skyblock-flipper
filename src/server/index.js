@@ -22,16 +22,31 @@ cfg.alerts = Object.assign({ flipProfit: 2000000, unusual: true, unusualZ: 4, co
 // one exists and the new one does not, keep using the old one.
 const legacyDir = path.join(os.homedir(), '.skyblock-flipper');
 const projectDir = path.join(__dirname, '..', '..', 'data');
-let dataDir = cfg.dataDir || projectDir;
-let adopted = false;
-if (!cfg.dataDir
-    && !fs.existsSync(path.join(projectDir, 'market.db'))
-    && fs.existsSync(path.join(legacyDir, 'market.db'))) {
-  dataDir = legacyDir;
-  adopted = true;
-}
-cfg.persistPath = path.join(dataDir, 'price-book.json');
 
+// Where the database goes, in order of preference:
+//   1. whatever the config says
+//   2. an existing project-local data/ - never relocate data already there
+//   3. the old home-directory one, so history collected earlier is not orphaned
+//   4. otherwise somewhere local and NOT cloud-synced
+//
+// That last point matters: the natural place to keep this folder is the Desktop,
+// and a Desktop is very often synced by OneDrive. A live SQLite file inside a
+// syncing folder risks corruption, and this database grows by roughly a gigabyte
+// a day - which is not something to push into someone's cloud storage.
+function defaultDataDir() {
+  if (process.platform === 'win32' && process.env.LOCALAPPDATA) {
+    return path.join(process.env.LOCALAPPDATA, 'SkyBlockTerminal');
+  }
+  return legacyDir;
+}
+
+let dataDir, why = '';
+if (cfg.dataDir) dataDir = cfg.dataDir;
+else if (fs.existsSync(path.join(projectDir, 'market.db'))) dataDir = projectDir;
+else if (fs.existsSync(path.join(legacyDir, 'market.db'))) { dataDir = legacyDir; why = '  [kept your existing history]'; }
+else { dataDir = defaultDataDir(); why = '  [outside the project, so cloud sync cannot corrupt it]'; }
+
+cfg.persistPath = path.join(dataDir, 'price-book.json');
 const store = new Store(path.join(dataDir, 'market.db'));
 const collector = new Collector(cfg, store);
 const { server } = createServer({ store, collector, cfg });
@@ -84,7 +99,7 @@ server.listen(PORT, HOST, () => {
   console.log('');
   console.log('  SkyBlock Terminal');
   console.log(`  http://${HOST}:${PORT}`);
-  console.log(`  data: ${dataDir}  (${size} MB)${adopted ? '  [kept your existing history]' : ''}`);
+  console.log(`  data: ${dataDir}  (${size} MB)${why}`);
   console.log(`  api:  ${cfg.apiKey ? 'key loaded' : 'no key (public endpoints - fine, just lower rate limits)'}`);
   if (HOST === '0.0.0.0') {
     console.log('');
