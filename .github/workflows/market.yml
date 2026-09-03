@@ -17,6 +17,8 @@ on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:        # so you can force a refresh from the Actions tab
+  push:
+    branches: [main]        # a deploy should not wait up to five minutes for data
 
 permissions:
   contents: write

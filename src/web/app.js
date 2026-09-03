@@ -259,7 +259,9 @@ function renderFlips() {
     sub.innerHTML = `<span class="tag ${f.strategy}">${f.strategy}</span>`
       + (f.isNew ? '<span class="tag new">new</span>' : '')
       + (f.seed ? '<span class="tag seed" title="from the collector snapshot - may already be gone">seed</span>' : '')
-      + ` ${f.basis} · n=${f.samples} · ${ago(f.seenAt)}`;
+      + ` ${f.basis} · n=${f.samples}`
+      + (f.ref && f.ref.median ? ` · typ ${fmt(f.ref.median)}` : '')
+      + ` · ${ago(f.seenAt)}`;
     c1.appendChild(sub);
     const c2 = el('td', 'r num', fmt(f.price));
     const c3 = el('td', 'r num', fmt(f.value));
@@ -405,14 +407,38 @@ async function selectItem(key, label) {
     hero.innerHTML = `<span class="big">${fmt(bz.sell_order)}</span>
       <span class="lbl">bazaar sell order · buy ${fmt(bz.buy_order)} · spread ${fmt(spread)}
       (${bz.buy_order ? ((spread / bz.buy_order) * 100).toFixed(1) : '0'}%)</span>`;
+  } else if (d.ref && d.ref.median) {
+    hero.innerHTML = `<span class="big">${fmt(d.ref.median)}</span>
+      <span class="lbl">typical sale price · not listed right now</span>`;
   } else {
-    hero.innerHTML = '<span class="big">—</span><span class="lbl">no history stored for this item yet</span>';
+    hero.innerHTML = '<span class="big">—</span><span class="lbl">nothing listed, and no sale history for it</span>';
   }
   if (d.kind) hero.appendChild(el('span', 'kindtag ' + d.kind, d.kind === 'both' ? 'AH + BZ' : d.kind.toUpperCase()));
   const watch = el('button', 'act', state.watchlist.some(w => w.key === key) ? 'Unwatch' : 'Watch');
   watch.onclick = () => toggleWatch(key, label);
   hero.appendChild(watch);
   host.appendChild(hero);
+
+  // What this item normally goes for, and where the chart below came from.
+  // Hypixel serves no history at all, so anything older than this tab is
+  // Coflnet's archive - say so rather than letting it look like ours.
+  if (d.ref || (d.history && (d.history.ah !== 'none' || d.history.bz !== 'none'))) {
+    const ctx = el('div', 'mini');
+    const bits = [];
+    if (d.ref) {
+      bits.push(`<span class="chip">typical <b>${fmt(d.ref.median)}</b></span>`);
+      if (d.ref.mean) bits.push(`<span class="chip">mean <b>${fmt(d.ref.mean)}</b></span>`);
+      if (d.ref.min) bits.push(`<span class="chip">low <b>${fmt(d.ref.min)}</b></span>`);
+      if (d.ref.max) bits.push(`<span class="chip">high <b>${fmt(d.ref.max)}</b></span>`);
+      if (d.ref.volume) bits.push(`<span class="chip">vol <b>${fmt(d.ref.volume)}</b></span>`);
+    }
+    const src = (d.history && (d.history.ah !== 'none' ? d.history.ah : d.history.bz)) || 'none';
+    if (src !== 'none') {
+      bits.push(`<span class="chip src" title="Hypixel publishes no price history; anything older than this tab comes from Coflnet's public archive">history <b>${src}</b></span>`);
+    }
+    ctx.innerHTML = bits.join('');
+    host.appendChild(ctx);
+  }
 
   // Only draw the auction panel if the item is actually on the auction house -
   // a bazaar-only product should not get an empty AH chart above its book.
