@@ -117,21 +117,27 @@ function createServer({ store, collector, cfg }) {
     if (p === '/api/overview') {
       const now = Date.now();
       const back = Number(u.searchParams.get('since') || 6 * 3600e3);
+      // Depth matters here. On live data an unfiltered version was topped by
+      // MINER_OUTFIT_BOOTS "130k -> 10.00m, +7592%" - which is not a move, it is
+      // a single cheap listing selling and leaving only expensive ones behind.
+      // Requiring several listings at BOTH ends makes the number mean something.
       const movers = store.all(`
         WITH latest AS (
-          SELECT key, lowest, ts,
+          SELECT key, lowest, depth, ts,
                  ROW_NUMBER() OVER (PARTITION BY key ORDER BY ts DESC) AS rn
           FROM bin_history WHERE ts >= ?
         ),
         first AS (
-          SELECT key, lowest,
+          SELECT key, lowest, depth,
                  ROW_NUMBER() OVER (PARTITION BY key ORDER BY ts ASC) AS rn
           FROM bin_history WHERE ts >= ?
         )
-        SELECT l.key, f.lowest AS then_price, l.lowest AS now_price,
+        SELECT l.key, f.lowest AS then_price, l.lowest AS now_price, l.depth AS depth,
                (l.lowest - f.lowest) * 100.0 / f.lowest AS pct
         FROM latest l JOIN first f ON f.key = l.key AND f.rn = 1
         WHERE l.rn = 1 AND f.lowest > 100000
+          AND l.depth >= 4 AND f.depth >= 4
+          AND ABS((l.lowest - f.lowest) * 100.0 / f.lowest) < 300
         ORDER BY ABS(pct) DESC LIMIT 40`, now - back, now - back);
       const volume = store.all(`
         SELECT key, COUNT(*) AS sales, AVG(price) AS avg, SUM(price) AS coins

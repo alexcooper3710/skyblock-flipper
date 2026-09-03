@@ -104,10 +104,12 @@ class Flipper extends EventEmitter {
   async loopAuctions() {
     while (this.running) {
       try {
-        const cycleStart = Date.now();
         const head = await this.waitForFreshSnapshot();
         if (!head) { await this.sleep(2000); continue; }
 
+        // Start the clock AFTER the wait - cycle time should mean "how long did
+        // it take to read and score this snapshot", not "how long is a minute".
+        const cycleStart = Date.now();
         const all = await api.getAllAuctionPages(head.body.totalPages, this.cfg.pageConcurrency);
         await this.processSnapshot(all, head.body.lastUpdated);
 

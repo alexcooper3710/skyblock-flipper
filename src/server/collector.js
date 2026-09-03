@@ -18,13 +18,19 @@ class Baseline {
   }
 
   // z-score against the item's own recent history; null until there's enough.
-  z(key, value, minSamples = 20) {
+  // A near-static item has an sd close to zero, which turns any blip into a
+  // 12-sigma "spike" - live data was full of these (FROGGLES_SILVER read
+  // "949.0k vs 949.0k baseline (7.7s)"). Require the spread to be a real
+  // fraction of the price, and the move itself to be materially large.
+  z(key, value, minSamples = 20, minRelSd = 0.005, minRelMove = 0.15) {
     const arr = this.series.get(key);
     if (!arr || arr.length < minSamples) return null;
     const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+    if (mean <= 0) return null;
     const variance = arr.reduce((a, b) => a + (b - mean) ** 2, 0) / arr.length;
     const sd = Math.sqrt(variance);
-    if (sd <= 0) return null;
+    if (sd <= 0 || sd / mean < minRelSd) return null;
+    if (Math.abs(value - mean) / mean < minRelMove) return null;
     return { z: (value - mean) / sd, mean, sd };
   }
 }
@@ -109,7 +115,9 @@ class Collector extends EventEmitter {
       if (this.cfg.alerts.unusual) {
         const stat = this.baselineBin.z(key, price);
         // Only shout about a big move on something with a real market behind it.
-        if (stat && Math.abs(stat.z) >= this.cfg.alerts.unusualZ && arr.length >= 3) {
+        // arr is the BIN wall; depth < 4 means the "move" is usually just the
+        // cheapest listing selling, not the item repricing.
+        if (stat && Math.abs(stat.z) >= this.cfg.alerts.unusualZ && arr.length >= 4) {
           const dir = stat.z < 0 ? 'dumped' : 'spiked';
           this.raise('unusual', key, `${key} ${dir}`,
             `${fmt(price)} vs ${fmt(stat.mean)} baseline (${stat.z.toFixed(1)}σ)`);

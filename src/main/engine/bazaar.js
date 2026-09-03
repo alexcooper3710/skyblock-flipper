@@ -4,15 +4,22 @@
 
 const RATIOS = require('./craft-ratios.json');
 
-// What you pay if you place a buy ORDER (top of the buy book + 0.1) and what you
-// receive on a sell ORDER (top of the sell book - 0.1). Instant buy/sell prices
-// are the other side of the same book and lose you the whole spread.
+// Hypixel's summaries are named from the API's point of view, not yours, and
+// they are the opposite way round to what the names suggest. Verified against
+// live data: for ENCHANTED_LAPIS_LAZULI, buy_summary[0] = 1103.5 matched
+// quick_status.buyPrice (instant BUY, the high side) and sell_summary[0] = 794.3
+// matched quick_status.sellPrice (instant SELL, the low side). So:
+//   buy_summary  = the ASK side (sell offers you can buy from)
+//   sell_summary = the BID side (buy orders you can sell into)
+// To place a buy order you outbid the best bid; to sell you undercut the best
+// ask. Reading these backwards makes every spread negative and silently kills
+// every order flip - which is exactly what it did.
 function topOfBook(product) {
-  const buy = product.buy_summary && product.buy_summary[0];
-  const sell = product.sell_summary && product.sell_summary[0];
+  const ask = product.buy_summary && product.buy_summary[0];
+  const bid = product.sell_summary && product.sell_summary[0];
   return {
-    buyOrder: buy ? buy.pricePerUnit + 0.1 : 0,   // what you'd offer to buy at
-    sellOrder: sell ? sell.pricePerUnit - 0.1 : 0, // what you'd list to sell at
+    buyOrder: bid ? bid.pricePerUnit + 0.1 : 0,   // outbid the best buy order
+    sellOrder: ask ? ask.pricePerUnit - 0.1 : 0,  // undercut the cheapest offer
     instantBuy: product.quick_status ? product.quick_status.buyPrice : 0,
     instantSell: product.quick_status ? product.quick_status.sellPrice : 0,
     buyVolWeek: product.quick_status ? product.quick_status.buyMovingWeek : 0,
