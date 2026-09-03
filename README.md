@@ -40,14 +40,39 @@ Storage is SQLite through **`node:sqlite`**, which ships inside Node 22.5+ - no
 native build step and no postinstall download, so there is nothing that can
 silently fail to install.
 
-### Why not GitHub Pages
+## The GitHub Pages build
 
-Pages is static hosting: no server process, so nothing polls the API and nothing
-accumulates history. A static page only holds data for as long as its tab is open,
-which is incompatible with keeping price history at all. The terminal has to run
-somewhere that can execute code and write a database - your machine, or any box
-you control. (A Pages site *can* work as a read-only companion, fed by a scheduled
-GitHub Action committing snapshots, but Actions' 5-minute floor rules out flips.)
+`docs/` is a second build of the same terminal that runs **entirely in the
+browser** - no server, no install, no `.bat`. Point GitHub Pages at
+`main` / `docs` and it is just a URL you and anyone you send it to can open.
+
+It works because the Hypixel auction and bazaar endpoints allow cross-origin
+requests, so the page polls them itself. Verified from a non-Hypixel origin:
+2,197 bazaar products and 45 auction pages came back fine. Item NBT is decoded
+in-tab with a dependency-free parser (`docs/nbt.js`) that is cross-checked
+against prismarine-nbt on real `item_bytes` in the test suite.
+
+**The one real trade-off:** a browser tab only collects while it is open. Flip
+detection needs two snapshots, so it is useful about two minutes after you open
+it - but long-run history only accumulates while a tab is up, and each browser
+keeps its own copy. If you want a machine quietly recording the market forever,
+that is the server build.
+
+Storage is IndexedDB in your own browser. The **save** button writes your
+collected history to a real file; **load** reads one back - so you can keep it
+wherever you like, or hand a snapshot to someone else. Your API key, if you set
+one, is kept in that browser's local storage and never leaves it.
+
+### One source of truth
+
+The pricing, strategy and bazaar logic is **not** duplicated for the web build.
+`npm run build:web` mechanically converts those modules from the server sources
+into `docs/shared/`, and refuses to emit a file it could not fully convert. The
+UI (`app.js`, `styles.css`) is copied, not forked. A fix to the bid/ask handling
+lands in both builds or neither.
+
+To try the browser build against the live API before publishing it:
+`npm run terminal`, then open **http://127.0.0.1:8787/pages/**.
 
 ## Running the desktop app instead
 
