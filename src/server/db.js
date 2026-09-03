@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS bin_history (
   lowest  INTEGER NOT NULL,
   second  INTEGER,
   depth   INTEGER NOT NULL,
+  wall    TEXT,                      -- the actual asking prices, comma separated
   PRIMARY KEY (key, ts)
 ) WITHOUT ROWID;
 
@@ -49,6 +50,17 @@ CREATE TABLE IF NOT EXISTS bz_history (
   instant_sell  REAL,
   buy_vol_week  INTEGER,
   sell_vol_week INTEGER,
+  PRIMARY KEY (product, ts)
+) WITHOUT ROWID;
+
+-- The order book itself, sampled. One row per product per sample holds both
+-- ladders as "price:amount:orders|..." so depth history costs one row, not
+-- forty-five.
+CREATE TABLE IF NOT EXISTS bz_depth (
+  ts      INTEGER NOT NULL,
+  product TEXT    NOT NULL,
+  bids    TEXT    NOT NULL,
+  asks    TEXT    NOT NULL,
   PRIMARY KEY (product, ts)
 ) WITHOUT ROWID;
 
@@ -91,9 +103,10 @@ class Store {
     this.migrate();
     this.stmt = {
       snapshot: this.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (?,?,?,?,?)'),
-      bin: this.db.prepare('INSERT OR REPLACE INTO bin_history VALUES (?,?,?,?,?)'),
+      bin: this.db.prepare('INSERT OR REPLACE INTO bin_history VALUES (?,?,?,?,?,?)'),
       sale: this.db.prepare('INSERT OR IGNORE INTO sales VALUES (?,?,?,?)'),
       bz: this.db.prepare('INSERT OR REPLACE INTO bz_history VALUES (?,?,?,?,?,?,?,?)'),
+      depth: this.db.prepare('INSERT OR REPLACE INTO bz_depth VALUES (?,?,?,?)'),
       flip: this.db.prepare(`INSERT OR REPLACE INTO flips
         (uuid,ts,name,key_base,key_variant,price,value,profit,margin,strategy,basis,samples)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`),
@@ -115,6 +128,13 @@ class Store {
         WHERE sell_order < buy_order`);
     }
     this.db.exec('PRAGMA user_version = 1');
+    this.addColumnIfMissing('bin_history', 'wall', 'TEXT');
+  }
+
+  addColumnIfMissing(table, column, type) {
+    const cols = this.all(`PRAGMA table_info(${table})`);
+    if (cols.some(c => c.name === column)) return;
+    this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
 
   tx(fn) {
@@ -128,7 +148,8 @@ class Store {
     this.tx(() => {
       this.stmt.snapshot.run(meta.ts, meta.totalAuctions, meta.binCount, meta.newBins, meta.cycleMs);
       for (const [key, arr] of wall) {
-        this.stmt.bin.run(meta.ts, key, Math.round(arr[0]), arr[1] ? Math.round(arr[1]) : null, arr.length);
+        this.stmt.bin.run(meta.ts, key, Math.round(arr[0]), arr[1] ? Math.round(arr[1]) : null,
+          arr.length, arr.map(p => Math.round(p)).join(','));
       }
     });
   }
@@ -144,6 +165,45 @@ class Store {
         this.stmt.bz.run(ts, product, t.buyOrder, t.sellOrder, t.instantBuy, t.instantSell, t.buyVolWeek, t.sellVolWeek);
       }
     });
+  }
+
+  // The full ladder every minute for 2000 products would be gigabytes a day, so
+  // top-of-book stays per-minute and the ladder is sampled less often.
+  writeDepth(ts, books) {
+    const enc = (rows) => (rows || []).map(l => `${l.price}:${l.amount}:${l.orders}`).join('|');
+    this.tx(() => {
+      for (const [product, t] of books) {
+        if (!t.bids || !t.asks) continue;
+        this.stmt.depth.run(ts, product, enc(t.bids), enc(t.asks));
+      }
+    });
+  }
+
+  depthAt(product, ts) {
+    const row = ts
+      ? this.one('SELECT * FROM bz_depth WHERE product = ? AND ts <= ? ORDER BY ts DESC LIMIT 1', product, ts)
+      : this.one('SELECT * FROM bz_depth WHERE product = ? ORDER BY ts DESC LIMIT 1', product);
+    if (!row) return null;
+    const dec = (s) => (s ? s.split('|').filter(Boolean).map(x => {
+      const [price, amount, orders] = x.split(':').map(Number);
+      return { price, amount, orders };
+    }) : []);
+    return { ts: row.ts, bids: dec(row.bids), asks: dec(row.asks) };
+  }
+
+  // How the wall thickened or thinned over time - depth history in coins, not counts.
+  depthHistory(product, sinceMs, limit = 240) {
+    const rows = this.all('SELECT ts, bids, asks FROM bz_depth WHERE product = ? AND ts >= ? ORDER BY ts DESC LIMIT ?',
+      product, sinceMs, limit);
+    const sum = (s) => (s || '').split('|').filter(Boolean)
+      .reduce((a, x) => { const p = x.split(':'); return a + Number(p[0]) * Number(p[1]); }, 0);
+    return rows.reverse().map(r => ({ t: r.ts, bidCoins: sum(r.bids), askCoins: sum(r.asks) }));
+  }
+
+  binWall(key) {
+    const row = this.one('SELECT ts, wall, depth FROM bin_history WHERE key = ? ORDER BY ts DESC LIMIT 1', key);
+    if (!row || !row.wall) return null;
+    return { ts: row.ts, depth: row.depth, prices: row.wall.split(',').map(Number) };
   }
 
   writeFlips(flips) {
@@ -264,6 +324,7 @@ class Store {
       binRows: q('SELECT COUNT(*) n FROM bin_history'),
       sales: q('SELECT COUNT(*) n FROM sales'),
       bzRows: q('SELECT COUNT(*) n FROM bz_history'),
+      depthRows: q('SELECT COUNT(*) n FROM bz_depth'),
       flips: q('SELECT COUNT(*) n FROM flips'),
       oldest: (this.one('SELECT MIN(ts) n FROM snapshots') || {}).n || null,
     };
@@ -273,6 +334,7 @@ class Store {
     this.tx(() => {
       this.run('DELETE FROM bin_history WHERE ts < ?', ts);
       this.run('DELETE FROM bz_history WHERE ts < ?', ts);
+      this.run('DELETE FROM bz_depth WHERE ts < ?', ts);
       this.run('DELETE FROM sales WHERE ts < ?', ts);
       this.run('DELETE FROM snapshots WHERE ts < ?', ts);
     });

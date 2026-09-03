@@ -105,6 +105,12 @@ function createServer({ store, collector, cfg }) {
         sales: store.salesHistory(key, since, r.bucket),
         bazaar: store.bzHistory(key, since, r.bucket),
         recentSales: store.all('SELECT price, ts FROM sales WHERE key = ? ORDER BY ts DESC LIMIT 40', key),
+        wall: store.binWall(key),
+        // live ladder if we have it this minute, else the last one stored
+        depth: collector.books.get(key)
+          ? { ts: collector.lastBazaar.at, bids: collector.books.get(key).bids, asks: collector.books.get(key).asks }
+          : store.depthAt(key),
+        depthHistory: store.depthHistory(key, since, 240),
         flips: store.all('SELECT * FROM flips WHERE key_base = ? ORDER BY ts DESC LIMIT 25', key),
       });
     }
@@ -113,6 +119,44 @@ function createServer({ store, collector, cfg }) {
       const q = (u.searchParams.get('q') || '').trim().toUpperCase();
       if (q.length < 2) return json(res, 200, { results: [] });
       return json(res, 200, { results: store.searchAll(q) });
+    }
+
+    // --- watchlist tickers ---------------------------------------------------
+    if (p === '/api/tickers') {
+      const since = Date.now() - 6 * 3600e3;
+      const rows = store.all('SELECT * FROM watchlist ORDER BY added_ts DESC').map(w => {
+        // an item lives on one market or the other; ask both and use what answers
+        const ah = store.all(
+          'SELECT ts AS t, lowest AS v FROM bin_history WHERE key = ? AND ts >= ? ORDER BY ts', w.key, since);
+        const bz = ah.length ? [] : store.all(
+          'SELECT ts AS t, sell_order AS v FROM bz_history WHERE product = ? AND ts >= ? ORDER BY ts', w.key, since);
+        const series = ah.length ? ah : bz;
+        // thin to a sparkline-sized sample without losing the shape
+        const step = Math.max(1, Math.ceil(series.length / 48));
+        const spark = series.filter((_, i) => i % step === 0).map(r => [r.t, r.v]);
+        const first = series.length ? series[0].v : null;
+        const last = series.length ? series[series.length - 1].v : null;
+        return {
+          ...w,
+          kind: ah.length ? 'ah' : bz.length ? 'bz' : 'none',
+          price: last, first,
+          changePct: first && last ? ((last - first) / first) * 100 : null,
+          spark,
+          hit: last != null && ((w.below && last <= w.below) || (w.above && last >= w.above)),
+        };
+      });
+      return json(res, 200, { tickers: rows });
+    }
+
+    if (p === '/api/depth') {
+      const product = u.searchParams.get('product');
+      if (!product) return json(res, 400, { error: 'product required' });
+      const live = collector.books.get(product);
+      return json(res, 200, {
+        product,
+        live: live ? { ts: collector.lastBazaar.at, bids: live.bids, asks: live.asks } : null,
+        stored: store.depthAt(product),
+      });
     }
 
     // --- browse the bazaar book ---------------------------------------------
