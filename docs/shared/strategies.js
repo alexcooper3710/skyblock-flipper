@@ -26,7 +26,10 @@ function makeFlip({ auction, item, keys, value, basis, strategy, confidence, sam
     samples,
     seenAt: Date.now(),
     listedAt: auction.start,
-    lore: (auction.item_lore || '').replace(/§./g, '').split('\n').slice(0, 6),
+    // The board is rebuilt against every BIN on the wall now, so makeFlip runs
+    // tens of thousands of times a snapshot. Only pay for the lore regex on the
+    // handful that are actually in profit.
+    lore: profit > 0 ? (auction.item_lore || '').replace(/§./g, '').split('\n').slice(0, 6) : [],
   };
 }
 
@@ -42,26 +45,31 @@ function passes(flip, cfg) {
 // Priced against the SECOND lowest so the exit is realistic, and refuses to
 // fire on a one-listing wall where the "lowest BIN" is meaningless.
 function lowestBinSnipe({ auction, item, keys, book, cfg }) {
-  const key = book.binDepth(keys.variant) >= 3 ? keys.variant : keys.base;
+  // Variant only. The base bucket holds every copy of the item - clean,
+  // recombobulated, enchanted, gemmed - so its wall is a blend of things that
+  // are not this item. Pricing against it invents discounts, which is exactly
+  // what made the auction numbers wrong. With no wall of its own this strategy
+  // has no opinion; refusing beats guessing.
+  const key = keys.variant;
   if (book.binDepth(key) < 3) return null;
   const wall = book.binAt(key, 1);
   if (!wall) return null;
   return makeFlip({
-    auction, item, keys, value: wall, basis: `bin2:${key === keys.variant ? 'variant' : 'base'}`,
-    strategy: 'lowest-bin', confidence: key === keys.variant ? 0.8 : 0.45,
-    samples: book.binDepth(key), cfg,
+    auction, item, keys, value: wall, basis: 'bin2:variant',
+    strategy: 'lowest-bin', confidence: 0.8, samples: book.binDepth(key), cfg,
   });
 }
 
 // 2. Sold-median. Slower to warm up, but it prices against money that actually
 // changed hands rather than against whatever someone hopes to get.
 function soldMedian({ auction, item, keys, book, cfg }) {
-  for (const [key, label, conf] of [[keys.variant, 'sold:variant', 0.95], [keys.base, 'sold:base', 0.6]]) {
-    if (!key) continue;
-    const st = book.soldStats(key);
-    if (st.n >= cfg.minSampleSize && st.median > 0) {
-      return makeFlip({ auction, item, keys, value: st.median, basis: label, strategy: 'sold-median', confidence: conf, samples: st.n, cfg });
-    }
+  // Same rule as the BIN wall, for the same reason: base-level sale history is
+  // a blend of every configuration of the item, so only the variant's own
+  // history says what THIS item sells for.
+  const st = book.soldStats(keys.variant);
+  if (st.n >= cfg.minSampleSize && st.median > 0) {
+    return makeFlip({ auction, item, keys, value: st.median, basis: st.seeded ? 'sold:variant(seed)' : 'sold:variant',
+      strategy: 'sold-median', confidence: 0.95, samples: st.n, cfg });
   }
   return null;
 }
@@ -92,7 +100,10 @@ function attributeAware({ auction, item, keys, book, cfg }) {
     if (unit) shardValue += unit * Math.pow(2, Math.max(0, lvl - 1));
   }
   if (shardValue <= 0) return null;
-  const base = book.binAt(keys.base, 1) || 0;
+  // The stock wall, not the base wall: base includes every rolled copy, which
+  // would double-count the very attributes the shard model is pricing.
+  const base = book.binAt(keys.stock, 1) || 0;
+  if (!base) return null;
   return makeFlip({ auction, item, keys, value: base + shardValue * 0.7, basis: 'shard-model', strategy: 'attribute', confidence: 0.5, samples: attrs.length, cfg });
 }
 
@@ -106,6 +117,9 @@ const REGISTRY = [
 // most confident first, then most profitable.
 function evaluate(ctx) {
   const { cfg } = ctx;
+  // Cheap rejection before any strategy runs - this is on the hot path for
+  // every BIN on the wall, every snapshot.
+  if (ctx.auction.starting_bid > cfg.maxBudget) return null;
   const results = [];
   for (const [name, fn] of REGISTRY) {
     if (!cfg.strategies[name]) continue;

@@ -11,6 +11,25 @@ import { Store } from './store.js';
 const BASE = 'https://api.hypixel.net/v2';
 const SNAPSHOT_MS = 60000, LEAD_MS = 800, PROBE_MS = 250, MAX_PROBE_MS = 20000;
 
+// Where the collector publishes. .github/workflows/market.yml runs the same
+// engine modules on a schedule and force-pushes the result to an orphan
+// `market-data` branch; raw.githubusercontent.com serves it with
+// access-control-allow-origin: *, so the tab can read it cross-origin.
+// Reading the owner and repo out of the Pages URL means a fork gets its own
+// data with nothing to configure.
+function seedBase() {
+  const host = location.hostname;
+  if (host.endsWith('.github.io')) {
+    const owner = host.slice(0, -('.github.io'.length));
+    const first = location.pathname.split('/').filter(Boolean)[0];
+    // user.github.io/repo/  -> project page.  user.github.io/  -> user page.
+    const repo = first && !first.includes('.') ? first : `${owner}.github.io`;
+    return `https://raw.githubusercontent.com/${owner}/${repo}/market-data/`;
+  }
+  return 'https://raw.githubusercontent.com/alexcooper3710/skyblock-flipper/market-data/';
+}
+const SEED_BASE = seedBase();
+
 export const CONFIG = {
   maxBudget: 200000000, minProfit: 1000000, minMarginPct: 8, minSampleSize: 3,
   soldWindowMinutes: 45, pageConcurrency: 8,
@@ -49,10 +68,76 @@ export class Engine extends EventTarget {
     this.books = new Map();
     this.depthTick = 0;
     this.cooldown = new Map();
-    this.stats = { snapshots: 0, flips: 0, lastCycleMs: 0, decodes: 0, totalAuctions: 0 };
+    this.stats = { snapshots: 0, flips: 0, lastCycleMs: 0, decodes: 0, totalAuctions: 0, boardSize: 0 };
     this.recentFlips = [];
+    this.flipFirstSeen = new Map();   // uuid -> when this board first showed it
+    this.startedAt = Date.now();
+    this.seedMeta = null;
     this.lastBazaar = { orders: [], crafts: [], at: 0 };
     this.watch = new Map();
+  }
+
+  // What the UI should tell the user right now. A blank panel with no
+  // explanation is the single worst state this thing can be in.
+  phase() {
+    if (!this.running) return { code: 'stopped', label: 'stopped' };
+    if (this.stats.snapshots === 0) {
+      const s = Math.round((Date.now() - this.startedAt) / 1000);
+      const m = this.seedMeta;
+      if (m && !m.error) {
+        return { code: 'seed', elapsed: s, ageMin: m.ageMin,
+          label: `showing the ${m.ageMin < 1 ? 'latest' : m.ageMin + 'm old'} collector snapshot · live snapshot in progress ${s}s` };
+      }
+      return { code: 'first-snapshot', label: `pulling the first auction snapshot… ${s}s`, elapsed: s };
+    }
+    return { code: 'live', label: 'live', elapsed: 0 };
+  }
+
+  // Pull the last collector snapshot before doing anything else. It is a real
+  // market computed a few minutes ago, which beats an empty screen for the
+  // thirty to sixty seconds the first live snapshot takes to arrive.
+  async loadSeed() {
+    const grab = async (name) => {
+      const r = await fetch(SEED_BASE + name + '?t=' + Math.floor(Date.now() / 60000), { cache: 'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status} on ${name}`);
+      return r.json();
+    };
+    try {
+      const [meta, ah, bz] = await Promise.all([grab('meta.json'), grab('ah.json'), grab('bazaar.json')]);
+      const ageMin = Math.round((Date.now() - meta.ts) / 60000);
+      this.seedMeta = { ...meta, ageMin };
+
+      if (bz && bz.products) {
+        const books = new Map();
+        for (const [id, p] of Object.entries(bz.products)) {
+          books.set(id, {
+            asks: (p.asks || []).map(([price, amount, orders]) => ({ price, amount, orders })),
+            bids: (p.bids || []).map(([price, amount, orders]) => ({ price, amount, orders })),
+            buyOrder: p.b, sellOrder: p.s, instantBuy: p.ib, instantSell: p.is,
+            buyVolWeek: p.bv, sellVolWeek: p.sv,
+          });
+        }
+        this.books = books;
+        this.lastBazaar = { orders: bz.orders || [], crafts: bz.crafts || [], at: bz.ts, seed: true };
+        this.emit('bazaar', this.lastBazaar);
+      }
+
+      if (ah) {
+        const wallKeys = this.book.seedWall(ah.wall);
+        const soldKeys = this.book.seedSold(ah.sold, meta.ts);
+        this.recentFlips = (ah.flips || []).map(f => ({ ...f, seed: true, isNew: false }));
+        this.stats.boardSize = this.recentFlips.length;
+        this.emit('flips', this.recentFlips);
+        this.log('info', `seeded from the collector: ${this.recentFlips.length} flips, ${wallKeys} wall keys, ${soldKeys} sold keys (${ageMin}m old)`);
+      }
+      this.emit('stats', { ...this.stats, book: this.book.stats(), warmedUp: this.warmedUp, phase: this.phase() });
+      return true;
+    } catch (e) {
+      // Not fatal, ever. No seed just means the cold start it always had.
+      this.seedMeta = { error: String(e && e.message || e) };
+      this.log('warn', `no collector snapshot available (${this.seedMeta.error}) - starting cold`);
+      return false;
+    }
   }
 
   emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
@@ -63,7 +148,15 @@ export class Engine extends EventTarget {
     if (this.running) return;
     this.running = true;
     await this.loadWatchlist();
+    // Paint from the collector snapshot first, then start the live loops. They
+    // overwrite it as their own data lands, so this is seed -> live rather than
+    // blank -> live.
+    await this.loadSeed();
     this.loopAuctions(); this.loopSold(); this.loopBazaar();
+    const beat = setInterval(() => {
+      if (!this.running || this.stats.snapshots > 0) return clearInterval(beat);
+      this.emit('stats', { ...this.stats, book: this.book.stats(), warmedUp: this.warmedUp, phase: this.phase() });
+    }, 1000);
   }
   stop() { this.running = false; }
 
@@ -98,7 +191,7 @@ export class Engine extends EventTarget {
           async (page) => { try { return (await getJson(`/skyblock/auctions?page=${page}`)).auctions || []; } catch { return []; } });
         await this.processSnapshot(pages.flat(), head.lastUpdated);
         this.stats.lastCycleMs = Date.now() - t0;
-        this.emit('stats', { ...this.stats, book: this.book.stats(), warmedUp: this.warmedUp });
+        this.emit('stats', { ...this.stats, book: this.book.stats(), warmedUp: this.warmedUp, phase: this.phase() });
       } catch (e) {
         this.log('error', `auction loop: ${e.message}`);
         await this.sleep(3000);
@@ -140,30 +233,52 @@ export class Engine extends EventTarget {
     if (!this.warmedUp) {
       this.warmedUp = true;
       this.log('info', `baseline built: ${bins.length} BINs across ${auctions.length} auctions`);
-      return;
     }
 
-    const flips = [];
-    for (const a of fresh) {
+    // Scan the WHOLE wall, not only listings that appeared since last snapshot.
+    // A listing sitting 40% under the wall is a flip whether it was posted ten
+    // seconds ago or ten minutes ago, and every strategy here prices against
+    // the wall or the sold feed - neither of which needs the listing to be new.
+    // Scanning only `fresh` is what made the first minute of every session show
+    // an empty panel: there is no `fresh` until snapshot 2 exists to diff.
+    const freshSet = new Set(fresh.map(a => a.uuid));
+    const board = [];
+    const seenNow = new Set();
+    for (const a of bins) {
       const c = this.keyCache.get(a.uuid);
       if (!c || CONFIG.blacklistIds.includes(c.item.id)) continue;
       const flip = evaluate({ auction: a, item: c.item, keys: c.keys, book: this.book, cfg: CONFIG });
-      if (flip) flips.push(flip);
+      if (!flip) continue;
+      // Keep the age honest across rescans: a flip re-seen on the next snapshot
+      // is not "0s ago", it has been sitting there the whole time.
+      let firstSeen = this.flipFirstSeen.get(a.uuid);
+      if (!firstSeen) { firstSeen = Date.now(); this.flipFirstSeen.set(a.uuid, firstSeen); }
+      flip.seenAt = firstSeen;
+      flip.isNew = freshSet.has(a.uuid);
+      seenNow.add(a.uuid);
+      board.push(flip);
     }
-    flips.sort((a, b) => b.profit - a.profit);
-    this.stats.flips += flips.length;
-    this.log('info', `snapshot +${fresh.length} new BINs -> ${flips.length} flips`);
-    if (flips.length) {
-      this.recentFlips = [...flips, ...this.recentFlips].slice(0, 300);
-      await this.store.writeFlips(flips);
-      for (const f of flips) {
-        if (f.profit >= CONFIG.alerts.flipProfit) {
-          this.raise('flip', f.keyBase, `${f.name}  +${Math.round(f.profit / 1e6)}m`,
-            `buy ${f.price} / worth ${f.value} · ${f.marginPct}% · ${f.strategy}`);
-        }
+    // A flip that vanished from the wall was bought or cancelled - drop it,
+    // rather than leaving a dead row the user will waste a click on.
+    for (const uuid of this.flipFirstSeen.keys()) if (!seenNow.has(uuid)) this.flipFirstSeen.delete(uuid);
+
+    board.sort((a, b) => b.profit - a.profit);
+    const newOnes = board.filter(f => f.isNew);
+    this.stats.flips += newOnes.length;
+    this.stats.boardSize = board.length;
+    this.recentFlips = board.slice(0, 300);
+    this.log('info', `snapshot: ${bins.length} BINs, +${fresh.length} new → ${board.length} under the wall (${newOnes.length} fresh)`);
+
+    if (board.length) await this.store.writeFlips(board.slice(0, 120));
+    // Only alert on listings that are actually new. Re-alerting every minute on
+    // the same stale row is how an alert feed becomes something you mute.
+    for (const f of newOnes) {
+      if (f.profit >= CONFIG.alerts.flipProfit) {
+        this.raise('flip', f.keyBase, `${f.name}  +${Math.round(f.profit / 1e6)}m`,
+          `buy ${f.price} / worth ${f.value} · ${f.marginPct}% · ${f.strategy}`);
       }
-      this.emit('flips', flips);
     }
+    this.emit('flips', this.recentFlips);
   }
 
   async loopSold() {

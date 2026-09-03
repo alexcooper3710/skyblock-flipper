@@ -39,6 +39,8 @@ class Flipper extends EventEmitter {
     this.lastUpdated = 0;
     this.running = false;
     this.warmedUp = false;
+    this.flipFirstSeen = new Map();   // uuid -> when the board first showed it
+    this.lastFlips = [];
     this.timers = [];
     this.persistPath = cfg.persistPath || null;
     this.stats = { snapshots: 0, flips: 0, lastCycleMs: 0, decodes: 0, totalAuctions: 0 };
@@ -167,8 +169,6 @@ class Flipper extends EventEmitter {
     this.book.rebuildBinWall(entries);
     this.emit('wall', { ts: lastUpdated, wall: this.book.lowestBin });
 
-    // First snapshot only establishes the baseline - firing flips off it would
-    // just be reacting to the entire existing market as if it were new.
     const fresh = [];
     if (this.knownUuids.size) {
       for (const a of bins) if (!this.knownUuids.has(a.uuid)) fresh.push(a);
@@ -179,25 +179,40 @@ class Flipper extends EventEmitter {
     if (!this.warmedUp) {
       this.warmedUp = true;
       this.log('info', `baseline built: ${bins.length} BINs across ${auctions.length} auctions`);
-      return;
     }
 
-    const flips = [];
-    for (const a of fresh) {
+    // Scan the whole wall, not only listings that appeared since last snapshot.
+    // Every strategy prices against the wall or the sold feed, and neither
+    // needs the listing to be new - so waiting for a diff just meant an empty
+    // panel for the first minute of every session for no benefit.
+    const freshSet = new Set(fresh.map(a => a.uuid));
+    const board = [];
+    const seenNow = new Set();
+    for (const a of bins) {
       const c = this.keyCache.get(a.uuid);
       if (!c) continue;
       if (this.cfg.blacklistIds.includes(c.item.id)) continue;
       const flip = evaluate({ auction: a, item: c.item, keys: c.keys, book: this.book, cfg: this.cfg });
-      if (flip) flips.push(flip);
+      if (!flip) continue;
+      let firstSeen = this.flipFirstSeen.get(a.uuid);
+      if (!firstSeen) { firstSeen = Date.now(); this.flipFirstSeen.set(a.uuid, firstSeen); }
+      flip.seenAt = firstSeen;
+      flip.isNew = freshSet.has(a.uuid);
+      seenNow.add(a.uuid);
+      board.push(flip);
     }
-    flips.sort((a, b) => b.profit - a.profit);
-    this.stats.flips += flips.length;
+    for (const uuid of this.flipFirstSeen.keys()) if (!seenNow.has(uuid)) this.flipFirstSeen.delete(uuid);
+
+    board.sort((a, b) => b.profit - a.profit);
+    const newOnes = board.filter(f => f.isNew);
+    this.stats.flips += newOnes.length;
+    this.lastFlips = board.slice(0, 300);
     this.emit('snapshot', {
       ts: lastUpdated, totalAuctions: auctions.length, binCount: bins.length,
       newBins: fresh.length, cycleMs: this.stats.lastCycleMs,
     });
-    this.log('info', `snapshot +${fresh.length} new BINs -> ${flips.length} flips`);
-    if (flips.length) this.emit('flips', flips);
+    this.log('info', `snapshot: ${bins.length} BINs, +${fresh.length} new -> ${board.length} under the wall (${newOnes.length} fresh)`);
+    this.emit('flips', this.lastFlips);
   }
 
   pruneKeyCache() {
