@@ -3,11 +3,20 @@ setlocal enabledelayedexpansion
 title Publish SkyBlock Terminal
 cd /d "%~dp0"
 
+set "LOG=%~dp0publish.log"
+echo publish attempt %DATE% %TIME% > "%LOG%"
+
 where git >nul 2>nul
 if errorlevel 1 (
-  echo.  & echo   Git is not installed: https://git-scm.com/download/win  & echo.
+  echo git not on PATH >> "%LOG%"
+  echo.
+  echo   Git is not installed on this PC.
+  echo   Either install it:  https://git-scm.com/download/win
+  echo   or use the no-git route - see UPLOAD-WITHOUT-GIT.txt in this folder.
+  echo.
   pause & exit /b 1
 )
+for /f "delims=" %%v in ('git --version') do echo %%v >> "%LOG%"
 
 REM If a remote is already set we go straight to pushing - re-running this after
 REM a failed push should not send you back through creating the repo again.
@@ -33,12 +42,13 @@ echo.
 git add -A
 git diff --cached --quiet || git commit -q -m "Local changes"
 git branch -M main
-git push -u origin main
+git push -u origin main 2>&1 | powershell -NoProfile -Command "$input | Tee-Object -FilePath '%LOG%' -Append"
 if errorlevel 1 (
   echo.
   echo   Push failed. Common causes:
   echo     - the repo was created WITH a README:  git pull --rebase origin main   then run this again
   echo     - wrong username in the remote:        git remote remove origin        then run this again
+  echo   The exact error is in publish.log next to this file - send me that.
   echo.
   pause & exit /b 1
 )
