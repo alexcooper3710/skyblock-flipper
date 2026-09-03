@@ -7,6 +7,7 @@ const path = require('path');
 const { URL } = require('url');
 
 const WEB = path.join(__dirname, '..', 'web');
+const DOCS = path.join(__dirname, '..', '..', 'docs');
 
 // Bumped whenever the API surface changes. Static files are read from disk per
 // request, but the server code is loaded into memory at startup - so dropping a
@@ -266,9 +267,14 @@ function createServer({ store, collector, cfg }) {
     }
 
     // --- static -------------------------------------------------------------
-    const file = p === '/' ? 'index.html' : p.replace(/^\/+/, '');
-    const full = path.join(WEB, file);
-    if (!full.startsWith(WEB)) return json(res, 403, { error: 'nope' });
+    // /pages/ serves the browser-only build, so it can be exercised against the
+    // live API before it ever goes near GitHub Pages.
+    const onPages = p === '/pages' || p.startsWith('/pages/');
+    const root = onPages ? DOCS : WEB;
+    const rel = onPages ? p.replace(/^\/pages\/?/, '') : p.replace(/^\/+/, '');
+    const file = (!rel || rel === '') ? 'index.html' : rel;
+    const full = path.join(root, file);
+    if (!full.startsWith(root)) return json(res, 403, { error: 'nope' });
     fs.readFile(full, (err, buf) => {
       if (err) return json(res, 404, { error: 'not found' });
       res.writeHead(200, {

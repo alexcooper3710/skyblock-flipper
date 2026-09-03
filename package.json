@@ -8,8 +8,9 @@
     "engine": "node scripts/engine-cli.js",
     "smoke": "node scripts/smoke.js",
     "dist": "electron-builder --win",
-    "test": "node test/parse.test.js && node test/pipeline.test.js && node test/bazaar.test.js && node test/persistence.test.js && node test/server.test.js",
-    "terminal": "node src/server/index.js"
+    "test": "node scripts/build-web.js && node test/parse.test.js && node test/pipeline.test.js && node test/bazaar.test.js && node test/persistence.test.js && node test/server.test.js",
+    "terminal": "node src/server/index.js",
+    "build:web": "node scripts/build-web.js"
   },
   "author": "",
   "license": "MIT",
