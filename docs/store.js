@@ -58,7 +58,9 @@ export class Store {
     for (const [product, t] of books) {
       rows.push({ product, ts, buy_order: t.buyOrder, sell_order: t.sellOrder,
         instant_buy: t.instantBuy, instant_sell: t.instantSell,
-        buy_vol_week: t.buyVolWeek, sell_vol_week: t.sellVolWeek });
+        buy_vol_week: t.buyVolWeek, sell_vol_week: t.sellVolWeek,
+        sell_offers: t.sellOffers, buy_orders: t.buyOrders,
+        ask_units: t.askUnits, bid_units: t.bidUnits });
     }
     return this.putMany('bz', rows);
   }

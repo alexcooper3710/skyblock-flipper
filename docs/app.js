@@ -12,7 +12,14 @@ const fmt = (n) => {
   if (a >= 1e9) return (n / 1e9).toFixed(2) + 'b';
   if (a >= 1e6) return (n / 1e6).toFixed(2) + 'm';
   if (a >= 1e3) return (n / 1e3).toFixed(1) + 'k';
-  return String(Math.round(n));
+  // Rounding to whole coins wipes out the entire bazaar. COAL trades at 6.6
+  // against 8.8 - a 33% spread - and Math.round turned that into "7 against 9,
+  // spread 2", which is both wrong and useless. Counts stay whole; anything
+  // with a fraction keeps enough of it to mean something.
+  if (Number.isInteger(n)) return String(n);
+  if (a >= 100) return n.toFixed(1);
+  if (a >= 1) return n.toFixed(2);
+  return n.toFixed(3);
 };
 const pct = (n) => (n > 0 ? '+' : '') + n.toFixed(1) + '%';
 // Ladder rungs differ by fractions of a coin; abbreviating them to "1.3k"
@@ -168,7 +175,19 @@ function sparkline(points, { w = 96, h = 26, color } = {}) {
 function ladderView(host, depth, title) {
   if (!depth || (!depth.bids.length && !depth.asks.length)) return;
   const wrap = el('div', 'ladder');
-  wrap.appendChild(el('div', 'lhead', title));
+  const head = el('div', 'lhead');
+  head.textContent = title;
+  // The ladder is a window, not the book: Hypixel truncates it at 30 ask levels
+  // and 15 bid. Say how many orders actually exist, from quick_status, or the
+  // visible rungs read as the whole market.
+  if (depth.buyOrders || depth.sellOffers) {
+    const t = el('span', 'lsub');
+    t.innerHTML = `<b>${fmt(depth.buyOrders)}</b> buy orders (${fmt(depth.bidUnits)} units)`
+      + ` · <b>${fmt(depth.sellOffers)}</b> sell offers (${fmt(depth.askUnits)} units)`;
+    t.title = 'Totals from quick_status. The rungs below are the top of the book only - Hypixel truncates the ladder at 30 levels a side.';
+    head.appendChild(t);
+  }
+  wrap.appendChild(head);
   const cum = (rows) => { let t = 0; return rows.map(r => ({ ...r, cum: (t += r.price * r.amount) })); };
   const bids = cum(depth.bids), asks = cum(depth.asks);
   const max = Math.max(bids.at(-1)?.cum || 0, asks.at(-1)?.cum || 0) || 1;
@@ -184,7 +203,8 @@ function ladderView(host, depth, title) {
       row.appendChild(bar);
       const px = el('span', 'lp num', exact(r.price));
       const am = el('span', 'la num', fmt(r.amount));
-      if (align === 'right') row.append(am, px); else row.append(px, am);
+      const or = el('span', 'lo num', r.orders == null ? '' : '×' + r.orders);
+      if (align === 'right') row.append(or, am, px); else row.append(px, am, or);
       row.title = `${exact(r.price)} × ${fmt(r.amount)} units · ${r.orders} order${r.orders === 1 ? '' : 's'} · ${fmt(r.price * r.amount)} coins`;
       col.appendChild(row);
     }
@@ -289,7 +309,8 @@ async function renderBazaarBook() {
     if (state.item === b.id) tr.className = 'sel';
     const c1 = el('td', 'name');
     c1.appendChild(el('div', null, b.id));
-    c1.appendChild(el('div', 'sub', `vol ${fmt(b.sellVol)}/wk · insta ${fmt(b.instantBuy)}/${fmt(b.instantSell)}`));
+    c1.appendChild(el('div', 'sub',
+      `${fmt(b.buyOrders)} buy / ${fmt(b.sellOffers)} sell orders · vol ${fmt(b.sellVol)}/wk · insta ${fmt(b.instantBuy)}/${fmt(b.instantSell)}`));
     tr.append(starCell(b.id, b.id), c1, el('td', 'r num', fmt(b.buy)), el('td', 'r num', fmt(b.sell)));
     const c4 = el('td', 'r num');
     c4.innerHTML = `${fmt(b.spread)}<div class="sub">${b.spreadPct.toFixed(1)}%</div>`;
@@ -468,6 +489,8 @@ async function selectItem(key, label) {
     const bzm = el('div', 'mini');
     bzm.innerHTML = `<span class="chip">insta buy <b>${fmt(bz.instant_buy)}</b></span>
       <span class="chip">insta sell <b>${fmt(bz.instant_sell)}</b></span>
+      ${bz.buy_orders != null ? `<span class="chip">buy orders <b>${fmt(bz.buy_orders)}</b></span>` : ''}
+      ${bz.sell_offers != null ? `<span class="chip">sell offers <b>${fmt(bz.sell_offers)}</b></span>` : ''}
       <span class="chip">buy vol/wk <b>${fmt(bz.buy_vol_week)}</b></span>
       <span class="chip">sell vol/wk <b>${fmt(bz.sell_vol_week)}</b></span>`;
     host.appendChild(bzm);

@@ -160,7 +160,8 @@ const routes = {
         : (latestBz || live) && !liveWall ? 'bz' : 'ah',
       current,
       bzCurrent: latestBz || (live ? { ts: engine.lastBazaar.at, buy_order: live.buyOrder, sell_order: live.sellOrder,
-        instant_buy: live.instantBuy, instant_sell: live.instantSell, buy_vol_week: live.buyVolWeek, sell_vol_week: live.sellVolWeek } : null),
+        instant_buy: live.instantBuy, instant_sell: live.instantSell, buy_vol_week: live.buyVolWeek, sell_vol_week: live.sellVolWeek,
+        buy_orders: live.buyOrders, sell_offers: live.sellOffers } : null),
       bin: binSeries,
       sales: salesSeries,
       bazaar: bzSeries,
@@ -176,7 +177,10 @@ const routes = {
       wall: liveWall
         ? { ts: engine.lastUpdated, depth: liveWall.length, prices: liveWall }
         : current ? { ts: current.ts, depth: current.depth, prices: current.wall || [] } : null,
-      depth: live ? { ts: engine.lastBazaar.at, bids: live.bids, asks: live.asks } : null,
+      depth: live ? { ts: engine.lastBazaar.at, bids: live.bids, asks: live.asks,
+        buyOrders: live.buyOrders, sellOffers: live.sellOffers,
+        askUnits: live.askUnits, bidUnits: live.bidUnits,
+        askTruncated: live.askTruncated, bidTruncated: live.bidTruncated } : null,
       depthHistory: [],
       flips: engine.recentFlips.filter(f => f.keyBase === key || f.keyVariant === key).slice(0, 25),
     });
@@ -202,7 +206,9 @@ const routes = {
       const spread = t.sellOrder - t.buyOrder;
       rows.push({ id, buy: t.buyOrder, sell: t.sellOrder, instantBuy: t.instantBuy, instantSell: t.instantSell,
         spread, spreadPct: t.buyOrder > 0 ? (spread / t.buyOrder) * 100 : 0,
-        buyVol: t.buyVolWeek, sellVol: t.sellVolWeek, ts: engine.lastBazaar.at });
+        buyVol: t.buyVolWeek, sellVol: t.sellVolWeek,
+        buyOrders: t.buyOrders, sellOffers: t.sellOffers,
+        askUnits: t.askUnits, bidUnits: t.bidUnits, ts: engine.lastBazaar.at });
     }
     rows.sort((a, b) => b.sellVol - a.sellVol);
     return json({ rows: rows.slice(0, 300) });
@@ -275,7 +281,8 @@ const routes = {
   '/api/depth': async (u) => {
     const product = u.searchParams.get('product');
     const live = engine.books.get(product);
-    return json({ product, live: live ? { ts: engine.lastBazaar.at, bids: live.bids, asks: live.asks } : null, stored: null });
+    return json({ product, live: live ? { ts: engine.lastBazaar.at, bids: live.bids, asks: live.asks,
+      buyOrders: live.buyOrders, sellOffers: live.sellOffers, askUnits: live.askUnits, bidUnits: live.bidUnits } : null, stored: null });
   },
 };
 

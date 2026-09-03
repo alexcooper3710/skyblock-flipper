@@ -150,5 +150,39 @@ function auction(uuid, price, bytes, name) {
   assert.strictEqual(bogus2, null, 'a stock copy is not priced against a base wall full of kitted copies');
   console.log('PASS stock copy is not priced against the kitted base wall');
 
+  // --- wall coherence ------------------------------------------------------
+  // The size of the claim raises the bar on how much the wall agrees with
+  // itself, not on how many listings there are. A scattered wall is not a
+  // price, however deep it is.
+  const kittedItem = readItem(await decodeItemBytes(fx.star.item_bytes));
+  const wallCase = (prices) => {
+    const b = new PriceBook(cfg);
+    b.rebuildBinWall(prices.map(p => ({ bin: true, price: p, keys: kitted })));
+    return evaluate({
+      auction: auction('w', prices[0], fx.star.item_bytes, 'Ghostly Boots'),
+      item: kittedItem, keys: kitted, book: b, cfg,
+    });
+  };
+  // Coherent wall, huge margin, only five listings: this is a real snipe.
+  let wf = wallCase([3000000, 10000000, 12000000, 13000000, 14000000]);
+  assert.ok(wf && wf.marginPct > 200, `a coherent wall passes a big claim (got ${wf && wf.marginPct})`);
+  console.log(`PASS coherent 5-deep wall allows a ${wf.marginPct}% claim`);
+
+  // Same depth, same margin, scattered wall: three people guessing.
+  wf = wallCase([3000000, 10000000, 40000000, 300000000, 900000000]);
+  assert.strictEqual(wf, null, 'a scattered wall is rejected however big the claim');
+  console.log('PASS scattered wall rejected');
+
+  // Big claim with nothing to corroborate the second listing.
+  wf = wallCase([3000000, 10000000, 11000000]);
+  assert.strictEqual(wf, null, 'a 100%+ claim needs a third opinion, not just a second');
+  console.log('PASS big claim on a 3-deep wall rejected');
+
+  // Modest claim on the same three-deep wall is fine - this is the bread and
+  // butter case and must not be filtered away.
+  wf = wallCase([9000000, 10000000, 11000000]);
+  assert.ok(wf, 'a modest claim on a coherent 3-deep wall still fires');
+  console.log(`PASS modest ${wf.marginPct}% claim on a 3-deep wall still fires`);
+
   console.log('\nALL PIPELINE TESTS PASSED');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });

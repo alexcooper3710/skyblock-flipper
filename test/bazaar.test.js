@@ -84,4 +84,35 @@ for (const [out, r] of Object.entries(RATIOS)) {
 assert.strictEqual(validateRatios(fake).length, 0);
 console.log(`PASS craft table self-consistent (${Object.keys(RATIOS).length - 1} conversions)`);
 
+// --- order counts ----------------------------------------------------------
+// The ladder cannot tell you how many orders exist: Hypixel truncates it at 30
+// ask levels and 15 bid. This fixture is COAL as the API actually returned it -
+// the ask rungs add up to 333 orders while quick_status says 648, and the bid
+// rungs to 138 against 180. Reading the counts off the ladder undercounts by
+// half, which is exactly the "there are more than 9 sell orders" complaint.
+const coal = {
+  buy_summary: Array.from({ length: 30 }, (_, i) => ({ pricePerUnit: 8.9 + i * 0.1, amount: 25000, orders: 11 })),
+  sell_summary: Array.from({ length: 12 }, (_, i) => ({ pricePerUnit: 6.5 - i * 0.1, amount: 100000, orders: 11 })),
+  quick_status: { buyPrice: 9.52, sellPrice: 6.45, buyMovingWeek: 55390521, sellMovingWeek: 627823926,
+    buyOrders: 648, sellOrders: 180, buyVolume: 42124272, sellVolume: 11575680 },
+};
+const coalTop = topOfBook(coal);
+assert.strictEqual(coalTop.sellOffers, 648, 'sell offers come from quick_status.buyOrders (the ask side)');
+assert.strictEqual(coalTop.buyOrders, 180, 'buy orders come from quick_status.sellOrders (the bid side)');
+assert.ok(coalTop.sellOffers > coal.buy_summary.reduce((a, l) => a + l.orders, 0),
+  'the real count exceeds what the truncated ladder can show');
+assert.strictEqual(coalTop.askUnits, 42124272);
+assert.strictEqual(coalTop.bidUnits, 11575680);
+assert.strictEqual(coalTop.askTruncated, true, '30 ask levels means there are more below');
+assert.strictEqual(coalTop.bidTruncated, false, '12 bid levels is the whole bid side');
+assert.strictEqual(coalTop.buyOrder, 6.6, 'outbid the best bid');
+assert.strictEqual(coalTop.sellOrder, 8.8, 'undercut the cheapest ask');
+console.log(`PASS order counts come from quick_status, not the truncated ladder {"sellOffers":${coalTop.sellOffers},"ladderSays":${coal.buy_summary.reduce((a, l) => a + l.orders, 0)}}`);
+
+// A product with no quick_status must not crash or invent counts.
+const bare = topOfBook({ buy_summary: [{ pricePerUnit: 10, amount: 1, orders: 1 }], sell_summary: [{ pricePerUnit: 5, amount: 1, orders: 1 }] });
+assert.strictEqual(bare.sellOffers, 0);
+assert.strictEqual(bare.buyOrders, 0);
+console.log('PASS missing quick_status degrades to zero counts');
+
 console.log('\nALL BAZAAR TESTS PASSED');
