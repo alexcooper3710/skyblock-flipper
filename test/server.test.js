@@ -40,6 +40,8 @@ collector.lastStats = { snapshots: 121, totalAuctions: 45000, lastCycleMs: 1500,
 collector.lastFlips = [{ uuid: 'u1', name: 'Ghostly Boots', keyBase: 'GHOST_BOOTS', price: 3e6, value: 1e7, profit: 68e5, marginPct: 226, strategy: 'lowest-bin', basis: 'bin2:variant', samples: 4, seenAt: now, command: '/viewauction u1' }];
 collector.lastBazaar = { orders: [{ kind: 'bazaar-order', id: 'ENCHANTED_DIAMOND', profit: 400000, spreadPct: 12, units: 500, buyAt: 1200, sellAt: 1400, weeklyVolume: 5e5 }], crafts: [], at: now };
 collector.refreshWatchlist = () => {};
+// deliberately left without `books` - the item endpoint must survive a collector
+// whose bazaar loop has not run yet rather than throwing inside the handler
 
 const cfg = { alerts: { flipProfit: 2e6, unusual: true, unusualZ: 4, cooldownMs: 900000 }, minProfit: 1e6, maxBudget: 2e8 };
 const { server } = createServer({ store, collector, cfg });
@@ -108,6 +110,10 @@ server.listen(0, '127.0.0.1', async () => {
     assert.ok(j.movers.every(m => m.depth >= 4), 'every mover should have a real wall behind it');
     console.log('PASS shallow-wall movers are excluded');
     console.log('PASS /api/overview', JSON.stringify({ movers: j.movers.length, bzMovers: j.bzMovers.length, topPct: gb.pct.toFixed(1) }));
+
+    r = await get('/api/depth?product=ENCHANTED_DIAMOND');
+    assert.strictEqual(r.status, 200, 'depth must not throw when no live book exists');
+    console.log('PASS /api/depth survives a collector with no live book');
 
     r = await get('/api/item?key=NOPE&range=1h');
     assert.strictEqual(r.status, 200);

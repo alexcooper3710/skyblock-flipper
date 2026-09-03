@@ -28,6 +28,13 @@ function json(res, code, body) {
 // Writes (watchlist edits, marking alerts read, and especially purge, which
 // deletes the entire history) are another matter: once this is bound to
 // anything but loopback, they need the token.
+// The bazaar loop may not have run yet, or the collector may be a stub.
+function liveDepth(collector, key) {
+  const book = collector.books && collector.books.get(key);
+  if (!book || !book.bids || !book.asks) return null;
+  return { ts: collector.lastBazaar ? collector.lastBazaar.at : Date.now(), bids: book.bids, asks: book.asks };
+}
+
 function isLoopback(req) {
   const a = req.socket.remoteAddress || '';
   return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
@@ -106,10 +113,9 @@ function createServer({ store, collector, cfg }) {
         bazaar: store.bzHistory(key, since, r.bucket),
         recentSales: store.all('SELECT price, ts FROM sales WHERE key = ? ORDER BY ts DESC LIMIT 40', key),
         wall: store.binWall(key),
-        // live ladder if we have it this minute, else the last one stored
-        depth: collector.books.get(key)
-          ? { ts: collector.lastBazaar.at, bids: collector.books.get(key).bids, asks: collector.books.get(key).asks }
-          : store.depthAt(key),
+        // live ladder if we have it this minute, else the last one stored.
+        // A throw in here takes the whole process down, so nothing is assumed.
+        depth: liveDepth(collector, key) || store.depthAt(key),
         depthHistory: store.depthHistory(key, since, 240),
         flips: store.all('SELECT * FROM flips WHERE key_base = ? ORDER BY ts DESC LIMIT 25', key),
       });
@@ -151,10 +157,9 @@ function createServer({ store, collector, cfg }) {
     if (p === '/api/depth') {
       const product = u.searchParams.get('product');
       if (!product) return json(res, 400, { error: 'product required' });
-      const live = collector.books.get(product);
       return json(res, 200, {
         product,
-        live: live ? { ts: collector.lastBazaar.at, bids: live.bids, asks: live.asks } : null,
+        live: liveDepth(collector, product),
         stored: store.depthAt(product),
       });
     }
