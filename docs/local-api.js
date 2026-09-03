@@ -200,6 +200,7 @@ const routes = {
 
   '/api/bazaar': async (u) => {
     const q = (u.searchParams.get('q') || '').trim().toUpperCase();
+    const sort = u.searchParams.get('sort') || 'volume';
     const rows = [];
     for (const [id, t] of engine.books) {
       if (q && !id.toUpperCase().includes(q)) continue;
@@ -208,10 +209,19 @@ const routes = {
         spread, spreadPct: t.buyOrder > 0 ? (spread / t.buyOrder) * 100 : 0,
         buyVol: t.buyVolWeek, sellVol: t.sellVolWeek,
         buyOrders: t.buyOrders, sellOffers: t.sellOffers,
-        askUnits: t.askUnits, bidUnits: t.bidUnits, ts: engine.lastBazaar.at });
+        askUnits: t.askUnits, bidUnits: t.bidUnits,
+        chg1h: t.chg1h ?? null, chg24h: t.chg24h ?? null, ts: engine.lastBazaar.at });
     }
-    rows.sort((a, b) => b.sellVol - a.sellVol);
-    return json({ rows: rows.slice(0, 300) });
+    const by = {
+      volume: (a, b) => b.sellVol - a.sellVol,
+      // Movers first, but a product with no change figure yet must not sort as 0%
+      // and displace something that genuinely has not moved.
+      movers: (a, b) => (b.chg1h == null ? -1 : Math.abs(b.chg1h)) - (a.chg1h == null ? -1 : Math.abs(a.chg1h)),
+      spread: (a, b) => b.spreadPct - a.spreadPct,
+      price: (a, b) => b.sell - a.sell,
+    };
+    rows.sort(by[sort] || by.volume);
+    return json({ rows: rows.slice(0, 300), sort });
   },
 
   '/api/overview': async (u) => {

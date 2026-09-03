@@ -35,7 +35,7 @@ const ago = (ts) => {
 const CSS = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
 const state = { flips: [], bazaar: { orders: [], crafts: [] }, alerts: [], watchlist: [], watchKeys: new Set(), bzQuery: '',
-  range: '24h', item: null, flipFilter: 'all', bzMode: 'browse', ovMode: 'movers', unseen: 0, phase: null, seed: null };
+  range: '24h', item: null, flipFilter: 'all', bzMode: 'browse', ovMode: 'movers', unseen: 0, phase: null, seed: null, bzSort: 'volume' };
 
 // ---------------------------------------------------------------- charts
 // Hand-rolled SVG: no chart library to install, and nothing to break offline.
@@ -295,14 +295,15 @@ function renderFlips() {
 
 async function renderBazaarBook() {
   const host = $('bazaar');
-  const r = await fetch('/api/bazaar?q=' + encodeURIComponent(state.bzQuery || '')).then(r => r.json()).catch(() => null);
+  const r = await fetch(`/api/bazaar?q=${encodeURIComponent(state.bzQuery || '')}&sort=${state.bzSort}`)
+    .then(r => r.json()).catch(() => null);
   host.innerHTML = '';
   if (!r || !r.rows.length) {
     host.appendChild(el('div', 'empty', state.bzQuery ? `Nothing in the book matches "${state.bzQuery}".` : 'Pulling the bazaar book…'));
     return;
   }
   const t = el('table');
-  t.innerHTML = '<thead><tr><th class="stc"></th><th>Product</th><th class="r">Buy</th><th class="r">Sell</th><th class="r">Spread</th></tr></thead>';
+  t.innerHTML = '<thead><tr><th class="stc"></th><th>Product</th><th class="r">Buy</th><th class="r">Sell</th><th class="r">Δ</th><th class="r">Spread</th></tr></thead>';
   const tb = el('tbody');
   for (const b of r.rows) {
     const tr = el('tr');
@@ -312,6 +313,17 @@ async function renderBazaarBook() {
     c1.appendChild(el('div', 'sub',
       `${fmt(b.buyOrders)} buy / ${fmt(b.sellOffers)} sell orders · vol ${fmt(b.sellVol)}/wk · insta ${fmt(b.instantBuy)}/${fmt(b.instantSell)}`));
     tr.append(starCell(b.id, b.id), c1, el('td', 'r num', fmt(b.buy)), el('td', 'r num', fmt(b.sell)));
+    // Price movement. A blank means we do not have an hour of samples for it
+    // yet - better than printing 0.0% and calling it flat.
+    const cd = el('td', 'r num');
+    if (b.chg1h == null) {
+      cd.innerHTML = '<span class="muted">—</span>';
+      cd.title = 'not enough samples yet for an hourly change';
+    } else {
+      cd.innerHTML = `<span class="${b.chg1h >= 0 ? 'pos' : 'neg'}">${pct(b.chg1h)}</span>`
+        + (b.chg24h == null ? '<div class="sub">1h</div>' : `<div class="sub">1h · 24h ${pct(b.chg24h)}</div>`);
+    }
+    tr.appendChild(cd);
     const c4 = el('td', 'r num');
     c4.innerHTML = `${fmt(b.spread)}<div class="sub">${b.spreadPct.toFixed(1)}%</div>`;
     tr.appendChild(c4);
@@ -323,7 +335,9 @@ async function renderBazaarBook() {
 
 function renderBazaar() {
   const host = $('bazaar');
-  $('bz-search').style.display = state.bzMode === 'browse' ? 'block' : 'none';
+  const browsing = state.bzMode === 'browse';
+  $('bz-search').style.display = browsing ? 'block' : 'none';
+  $('bz-sort').style.display = browsing ? 'flex' : 'none';
   if (state.bzMode === 'browse') return renderBazaarBook();
   const rows = state.bazaar[state.bzMode] || [];
   host.innerHTML = '';
@@ -666,13 +680,14 @@ const seg = (id, key, after) => {
     const b = e.target.closest('button'); if (!b) return;
     [...$(id).querySelectorAll('button')].forEach(x => x.classList.remove('on'));
     b.classList.add('on');
-    state[key] = b.dataset.f || b.dataset.r || b.dataset.m;
+    state[key] = b.dataset.f || b.dataset.r || b.dataset.m || b.dataset.s;
     after();
   });
 };
 seg('flip-filter', 'flipFilter', renderFlips);
 seg('range', 'range', () => state.item && selectItem(state.item, $('item-title').textContent));
 seg('bz-mode', 'bzMode', renderBazaar);
+seg('bz-sort', 'bzSort', renderBazaarBook);
 seg('ov-mode', 'ovMode', renderOverview);
 
 let bzTimer;

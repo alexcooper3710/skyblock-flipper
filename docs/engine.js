@@ -76,6 +76,8 @@ export class Engine extends EventTarget {
     this.seedMeta = null;
     this.firstBoardAt = 0;
     this.refCache = new Map();   // cofl tag -> typical price, from the collector seed
+    this.bzSeries = new Map();   // product -> [sell price per poll], this session
+    this.bzSeriesStep = 60000;
     this.lastBazaar = { orders: [], crafts: [], at: 0 };
     this.watch = new Map();
   }
@@ -120,6 +122,9 @@ export class Engine extends EventTarget {
             bids: (p.bids || []).map(([price, amount, orders]) => ({ price, amount, orders })),
             buyOrder: p.b, sellOrder: p.s, instantBuy: p.ib, instantSell: p.is,
             buyVolWeek: p.bv, sellVolWeek: p.sv,
+            sellOffers: p.so, buyOrders: p.bo, askUnits: p.au, bidUnits: p.du,
+            // Price movement the collector worked out by diffing its own runs.
+            chg1h: p.c1 ?? null, chg24h: p.c24 ?? null,
           });
         }
         this.books = books;
@@ -147,6 +152,21 @@ export class Engine extends EventTarget {
       this.log('warn', `no collector snapshot available (${this.seedMeta.error}) - starting cold`);
       return false;
     }
+  }
+
+  // Percentage move over the last `mins` minutes from this session's own
+  // samples. Returns null rather than reporting a ten-minute move as an hourly
+  // one - a change column that lies about its window is worse than a blank.
+  changeOver(id, mins) {
+    const arr = this.bzSeries.get(id);
+    if (!arr || arr.length < 2) return null;
+    const want = Math.round((mins * 60000) / this.bzSeriesStep);
+    const now = arr[arr.length - 1];
+    if (!now) return null;
+    const from = Math.max(0, arr.length - 1 - want);
+    if (arr.length - 1 - from < want * 0.6) return null;
+    for (let i = from; i < arr.length - 1; i++) if (arr[i]) return ((now - arr[i]) / arr[i]) * 100;
+    return null;
   }
 
   emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
@@ -356,6 +376,24 @@ export class Engine extends EventTarget {
         const body = await getJson('/skyblock/bazaar');
         const books = new Map();
         for (const [id, product] of Object.entries(body.products)) books.set(id, topOfBook(product));
+
+        // Keep our own price series for the session. The collector's numbers are
+        // up to five minutes old; this is what makes the change column move
+        // while you are watching it.
+        const SPAN = 6 * 60;   // six hours of one-minute samples
+        for (const [id, t] of books) {
+          let arr = this.bzSeries.get(id);
+          if (!arr) this.bzSeries.set(id, (arr = []));
+          arr.push(t.sellOrder || null);
+          if (arr.length > SPAN) arr.shift();
+        }
+        for (const [id, t] of books) {
+          const prev = this.books.get(id);
+          const live = this.changeOver(id, 60);
+          // Ours once we have a real hour of it; the seed's until then.
+          t.chg1h = live != null ? live : (prev ? prev.chg1h ?? null : null);
+          t.chg24h = prev ? prev.chg24h ?? null : null;
+        }
         this.books = books;
         this.lastBazaar = {
           orders: orderFlips(body.products, CONFIG).slice(0, 60),

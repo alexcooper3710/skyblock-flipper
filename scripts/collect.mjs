@@ -23,6 +23,7 @@ const { PriceBook } = await import(path.join(ROOT, 'docs/shared/pricing.js'));
 const { evaluate } = await import(path.join(ROOT, 'docs/shared/strategies.js'));
 const { topOfBook, orderFlips, craftFlips } = await import(path.join(ROOT, 'docs/shared/bazaar.js'));
 const { coflTag: coflTagOf } = await import(path.join(ROOT, 'docs/cofl.js'));
+const { appendSeries, changeOver, emptySeries, STEP_MS: SERIES_STEP_MS } = await import(path.join(ROOT, 'scripts/bz-series.mjs'));
 
 const OUT = path.join(ROOT, 'out');
 const PREV = path.join(ROOT, 'prev');
@@ -64,6 +65,14 @@ async function mapPool(items, limit, fn) {
     while (true) { const k = i++; if (k >= items.length) return; out[k] = await fn(items[k]); }
   }));
   return out;
+}
+
+async function loadSeries() {
+  try {
+    const s = JSON.parse(await fs.readFile(path.join(PREV, 'bz-series.json'), 'utf8'));
+    if (s && s.v === 1 && s.products) return s;
+  } catch { /* first run - start from nothing */ }
+  return emptySeries();
 }
 
 // Last run's sold samples, so the window is continuous across runs instead of
@@ -115,6 +124,7 @@ async function pollSold(book, seen) {
       b: Number(t.buyOrder.toFixed(1)), s: Number(t.sellOrder.toFixed(1)),
       ib: Number((t.instantBuy || 0).toFixed(1)), is: Number((t.instantSell || 0).toFixed(1)),
       bv: t.buyVolWeek, sv: t.sellVolWeek,
+      so: t.sellOffers, bo: t.buyOrders, au: t.askUnits, du: t.bidUnits,
       // A handful of rungs is enough to show where the wall is; the tab fills in
       // the full 30-deep ladder from its own poll a second after it opens.
       bids: t.bids.slice(0, 6).map(l => [Number(l.price.toFixed(1)), l.amount, l.orders]),
@@ -122,6 +132,21 @@ async function pollSold(book, seen) {
     };
   }
   log(`bazaar: ${Object.keys(products).length} products`);
+
+  const prevSeries = await loadSeries();
+  const series = appendSeries(prevSeries, products, Date.now());
+  const sampleLen = Object.values(series.products)[0]?.[0]?.length || 0;
+  log(`price series: ${Object.keys(series.products).length} products, ${sampleLen} samples (${(sampleLen * SERIES_STEP_MS / 3600e3).toFixed(1)}h)`);
+  // Hang the movement straight off each product so the page does not have to
+  // walk the series to render a list.
+  let moved = 0;
+  for (const [id, p] of Object.entries(products)) {
+    const h1 = changeOver(series, id, 60);
+    const h24 = changeOver(series, id, 24 * 60);
+    if (h1 != null) { p.c1 = Number(h1.toFixed(2)); moved++; }
+    if (h24 != null) p.c24 = Number(h24.toFixed(2));
+  }
+  log(`price change available for ${moved} products`);
 
   // ---- auctions: the expensive half ---------------------------------------
   const head = await getJson('/skyblock/auctions?page=0');
@@ -209,6 +234,7 @@ async function pollSold(book, seen) {
     wallKeys: Object.keys(wall).length, soldKeys: Object.keys(sold).length,
     refKeys: Object.keys(ref).length,
     bazaarProducts: Object.keys(products).length,
+    seriesProducts: Object.keys(series.products).length, seriesSamples: sampleLen,
     snapshotAt: head.lastUpdated, cfg: CFG,
   };
 
@@ -221,6 +247,7 @@ async function pollSold(book, seen) {
   await write('bazaar.json', { ts, products, orders: orderFlips(bz.products, CFG).slice(0, 60), crafts: craftFlips(bz.products, CFG).slice(0, 60) });
   await write('ah.json', { ts, flips, wall, sold, ref });
   await write('sold-raw.json', book.serialize());
+  await write('bz-series.json', series);
 
   log(`done in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 })().catch((e) => { console.error('COLLECT FAILED', e); process.exit(1); });
