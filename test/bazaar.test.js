@@ -35,6 +35,15 @@ assert.strictEqual(+t.buyOrder.toFixed(1), 794.4, 'buy order outbids the best bi
 assert.strictEqual(+t.sellOrder.toFixed(1), 1103.4, 'sell offer undercuts the cheapest ask');
 console.log('PASS bid/ask orientation matches the live API', JSON.stringify({ buy: t.buyOrder, sell: t.sellOrder }));
 
+// The ladders must come out on the correct sides too, or the order book view
+// draws bids above asks and looks like a broken market.
+assert.ok(t.bids.length && t.asks.length, 'both ladders should be captured');
+assert.ok(t.bids[0].price < t.asks[0].price,
+  `best bid ${t.bids[0].price} must sit below best ask ${t.asks[0].price}`);
+assert.strictEqual(t.bids[0].price, 794.3, 'bids come from sell_summary');
+assert.strictEqual(t.asks[0].price, 1103.5, 'asks come from buy_summary');
+console.log('PASS ladders land on the correct sides', JSON.stringify({ bid: t.bids[0].price, ask: t.asks[0].price }));
+
 const products = {
   WIDGET: book(200, 100, 700000),
   THIN_WIDGET: book(200, 100, 10),

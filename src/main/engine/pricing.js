@@ -52,7 +52,7 @@ class PriceBook {
     this.lowestBin.clear();
     for (const [k, arr] of buckets) {
       arr.sort((a, b) => a - b);
-      this.lowestBin.set(k, arr.slice(0, 4));
+      this.lowestBin.set(k, arr.slice(0, 8));
     }
     this.lastSnapshotAt = Date.now();
   }

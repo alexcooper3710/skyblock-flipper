@@ -44,6 +44,8 @@ class Collector extends EventEmitter {
     this.baselineBin = new Baseline(60);
     this.baselineSpread = new Baseline(60);
     this.lastBazaar = { orders: [], crafts: [], at: 0 };
+    this.books = new Map();       // live ladders, always current, never stale
+    this.depthTick = 0;
     this.lastFlips = [];
     this.lastStats = null;
     this.watch = this.loadWatchlist();
@@ -77,8 +79,15 @@ class Collector extends EventEmitter {
 
     e.on('bazaar', (b) => {
       this.lastBazaar = { orders: b.orders, crafts: b.crafts, at: b.at };
-      try { this.store.writeBazaar(b.at, b.books); }
-      catch (err) { this.emit('log', { level: 'warn', msg: `bazaar write: ${err.message}` }); }
+      this.books = b.books;
+      try {
+        this.store.writeBazaar(b.at, b.books);
+        // Top-of-book every minute; the full ladder every fifth, or depth
+        // history alone would be gigabytes a day.
+        if (this.depthTick++ % (this.cfg.depthEveryNPolls || 5) === 0) {
+          this.store.writeDepth(b.at, b.books);
+        }
+      } catch (err) { this.emit('log', { level: 'warn', msg: `bazaar write: ${err.message}` }); }
       this.checkBazaar(b);
       this.emit('bazaar', this.lastBazaar);
     });

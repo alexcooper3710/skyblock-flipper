@@ -72,7 +72,10 @@ td.name > div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ---- charts ---- */
 .chartwrap{padding:8px 10px 2px}
-svg{display:block;width:100%;overflow:visible}
+/* Scope the stretch to real charts. A global svg{width:100%} makes an inline
+   sparkline claim the whole flex row and collapse its siblings to zero width. */
+.chartwrap svg{display:block;width:100%;overflow:visible}
+svg{display:block;overflow:visible}
 .grid line{stroke:var(--line);stroke-width:1}
 .axis text{fill:var(--text-muted);font-size:10px;font-family:var(--mono)}
 .line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
@@ -116,3 +119,38 @@ button.act:hover{color:var(--text-primary);border-color:var(--text-muted)}
 .kindtag.bz{color:var(--series-2);border-color:#6b3418}
 .kindtag.ah{color:var(--series-1);border-color:#24507f}
 .kindtag.both{color:var(--series-3);border-color:#15583f}
+
+/* --- order book ladder --- */
+.ladder{padding:8px 10px 4px}
+.lhead{color:var(--text-muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:5px}
+.lgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.lcol{display:flex;flex-direction:column;gap:1px}
+.lrow{position:relative;display:flex;justify-content:space-between;padding:2px 6px;font-size:11px;overflow:hidden}
+.lrow i{position:absolute;top:0;bottom:0;border-radius:2px}
+.lrow.bid i{right:0} .lrow.ask i{left:0}
+.lrow .lp,.lrow .la{position:relative;z-index:1}
+.lrow.bid .lp{color:var(--series-3)} .lrow.ask .lp{color:var(--series-2)}
+.lrow .la{color:var(--text-muted)}
+
+/* --- watchlist tickers --- */
+.ticker{padding:8px 10px;border-bottom:1px solid #26262433;cursor:pointer}
+.ticker svg{flex:0 0 96px;width:96px}
+.ticker:hover{background:var(--surface-1)}
+.ticker.hit{box-shadow:inset 3px 0 0 var(--warning)}
+.trow{display:flex;align-items:center;gap:10px}
+.tname{flex:1;min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tprice{text-align:right;min-width:88px}
+.tprice .big{font-size:15px;font-weight:700}
+.thr{margin-top:5px;gap:6px}
+.thr .sub{text-transform:uppercase;letter-spacing:.5px;font-size:9.5px}
+.thr-in{background:var(--surface-2);border:1px solid var(--line);color:var(--text-primary);
+  border-radius:4px;padding:2px 6px;width:78px;font-size:11px}
+.thr-in:focus{outline:none;border-color:var(--series-1)}
+
+/* --- watch stars --- */
+th.stc,td.stc{width:22px;padding-left:6px;padding-right:0}
+.star{background:none;border:0;color:var(--text-muted);cursor:pointer;font-size:13px;
+  line-height:1;padding:2px;border-radius:3px}
+.star:hover{color:var(--warning)}
+.star.on{color:var(--warning)}
+#drop .star{margin-right:2px}

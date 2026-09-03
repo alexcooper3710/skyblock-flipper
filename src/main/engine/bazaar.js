@@ -14,10 +14,21 @@ const RATIOS = require('./craft-ratios.json');
 // To place a buy order you outbid the best bid; to sell you undercut the best
 // ask. Reading these backwards makes every spread negative and silently kills
 // every order flip - which is exactly what it did.
+// Keep the ladder, not just its first rung. "8 orders exist" tells you nothing;
+// "84,654 units sitting at 1266.2" tells you where the wall actually is.
+const LADDER_LEVELS = 10;
+function ladder(levels) {
+  return (levels || []).slice(0, LADDER_LEVELS).map(l => ({
+    price: l.pricePerUnit, amount: l.amount, orders: l.orders,
+  }));
+}
+
 function topOfBook(product) {
   const ask = product.buy_summary && product.buy_summary[0];
   const bid = product.sell_summary && product.sell_summary[0];
   return {
+    asks: ladder(product.buy_summary),   // ascending: cheapest offer first
+    bids: ladder(product.sell_summary),  // descending: best bid first
     buyOrder: bid ? bid.pricePerUnit + 0.1 : 0,   // outbid the best buy order
     sellOrder: ask ? ask.pricePerUnit - 0.1 : 0,  // undercut the cheapest offer
     instantBuy: product.quick_status ? product.quick_status.buyPrice : 0,
@@ -115,4 +126,4 @@ function validateRatios(products) {
   return missing;
 }
 
-module.exports = { orderFlips, craftFlips, topOfBook, validateRatios, RATIOS };
+module.exports = { orderFlips, craftFlips, topOfBook, ladder, validateRatios, RATIOS, LADDER_LEVELS };
