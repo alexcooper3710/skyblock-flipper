@@ -16,7 +16,9 @@ const RATIOS = require('./craft-ratios.json');
 // every order flip - which is exactly what it did.
 // Keep the ladder, not just its first rung. "8 orders exist" tells you nothing;
 // "84,654 units sitting at 1266.2" tells you where the wall actually is.
-const LADDER_LEVELS = 10;
+// Hypixel returns up to 30 ask levels and 15 bid levels. Keep all of them -
+// truncating the book is exactly the "only four orders" problem.
+const LADDER_LEVELS = 30;
 function ladder(levels) {
   return (levels || []).slice(0, LADDER_LEVELS).map(l => ({
     price: l.pricePerUnit, amount: l.amount, orders: l.orders,
