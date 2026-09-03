@@ -28,7 +28,7 @@ const ago = (ts) => {
 const CSS = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
 const state = { flips: [], bazaar: { orders: [], crafts: [] }, alerts: [], watchlist: [], watchKeys: new Set(), bzQuery: '',
-  range: '24h', item: null, flipFilter: 'all', bzMode: 'orders', ovMode: 'movers', unseen: 0 };
+  range: '24h', item: null, flipFilter: 'all', bzMode: 'browse', ovMode: 'movers', unseen: 0, phase: null, seed: null };
 
 // ---------------------------------------------------------------- charts
 // Hand-rolled SVG: no chart library to install, and nothing to break offline.
@@ -239,7 +239,14 @@ function renderFlips() {
   const host = $('flips');
   const rows = state.flipFilter === 'all' ? state.flips : state.flips.filter(f => f.strategy === state.flipFilter);
   host.innerHTML = '';
-  if (!rows.length) { host.appendChild(el('div', 'empty', 'No flips matching that filter yet.')); return; }
+  if (!rows.length) {
+    const p = state.phase;
+    host.appendChild(el('div', 'empty',
+      p && (p.code === 'first-snapshot' || p.code === 'seed') ? p.label
+      : state.flipFilter !== 'all' ? 'No flips matching that filter right now.'
+      : 'Nothing on the wall is under its own resale price right now. Rechecked every snapshot.'));
+    return;
+  }
   const t = el('table');
   t.innerHTML = '<thead><tr><th class="stc"></th><th>Item</th><th class="r">Buy</th><th class="r">Worth</th><th class="r">Profit</th></tr></thead>';
   const tb = el('tbody');
@@ -248,7 +255,11 @@ function renderFlips() {
     if (state.item === f.keyBase) tr.className = 'sel';
     const c1 = el('td'); c1.className = 'name';
     c1.appendChild(el('div', null, f.name));
-    const sub = el('div', 'sub'); sub.innerHTML = `<span class="tag ${f.strategy}">${f.strategy}</span> ${f.basis} · n=${f.samples} · ${ago(f.seenAt)}`;
+    const sub = el('div', 'sub');
+    sub.innerHTML = `<span class="tag ${f.strategy}">${f.strategy}</span>`
+      + (f.isNew ? '<span class="tag new">new</span>' : '')
+      + (f.seed ? '<span class="tag seed" title="from the collector snapshot - may already be gone">seed</span>' : '')
+      + ` ${f.basis} · n=${f.samples} · ${ago(f.seenAt)}`;
     c1.appendChild(sub);
     const c2 = el('td', 'r num', fmt(f.price));
     const c3 = el('td', 'r num', fmt(f.value));
@@ -264,7 +275,10 @@ async function renderBazaarBook() {
   const host = $('bazaar');
   const r = await fetch('/api/bazaar?q=' + encodeURIComponent(state.bzQuery || '')).then(r => r.json()).catch(() => null);
   host.innerHTML = '';
-  if (!r || !r.rows.length) { host.appendChild(el('div', 'empty', 'No bazaar history stored yet - give it a minute.')); return; }
+  if (!r || !r.rows.length) {
+    host.appendChild(el('div', 'empty', state.bzQuery ? `Nothing in the book matches "${state.bzQuery}".` : 'Pulling the bazaar book…'));
+    return;
+  }
   const t = el('table');
   t.innerHTML = '<thead><tr><th class="stc"></th><th>Product</th><th class="r">Buy</th><th class="r">Sell</th><th class="r">Spread</th></tr></thead>';
   const tb = el('tbody');
@@ -555,13 +569,35 @@ function setStats(s) {
   $('s-auc').textContent = fmt(s.totalAuctions);
   $('s-cycle').textContent = (s.lastCycleMs / 1000).toFixed(1) + 's';
   $('s-sold').textContent = fmt(s.book ? s.book.soldSamples : 0);
+  if (s.seed !== undefined) state.seed = s.seed;
+  if (s.phase) {
+    const was = state.phase && state.phase.code;
+    state.phase = s.phase;
+    $('dot').title = s.phase.label;
+    const mode = $('s-mode');
+    if (mode) {
+      // Say plainly whether these numbers are live or a few minutes old. A
+      // market terminal that will not tell you the age of its data is a liar.
+      const label = s.phase.code === 'live' ? 'live'
+        : s.phase.code === 'seed' ? `collector ${s.phase.ageMin < 1 ? '<1' : s.phase.ageMin}m`
+        : s.phase.code === 'stopped' ? 'stopped' : 'starting…';
+      mode.textContent = label;
+      mode.className = s.phase.code === 'live' ? 'live' : s.phase.code === 'seed' ? 'seeded' : '';
+      $('s-mode-wrap').title = s.phase.label;
+    }
+    // Repaint the placeholder while it is still counting up, and once more when
+    // the first snapshot finally lands.
+    if (s.phase.code !== 'live' || was !== 'live') renderFlips();
+  }
 }
 
 function bumpAlerts(n) { state.unseen += n; $('s-alerts').textContent = state.unseen; }
 
 const es = new EventSource('/api/stream');
 es.addEventListener('flips', (e) => {
-  state.flips = [...JSON.parse(e.data), ...state.flips].slice(0, 300);
+  // The engine sends the whole current board every snapshot. Replace, don't
+  // prepend: a flip that got bought must disappear instead of piling up.
+  state.flips = JSON.parse(e.data);
   renderFlips();
 });
 es.addEventListener('bazaar', (e) => { state.bazaar = JSON.parse(e.data); renderBazaar(); });
@@ -631,6 +667,10 @@ window.addEventListener('resize', () => { if (state.item) selectItem(state.item,
 // Before anything else: is the process we are talking to the build these files
 // belong to? Dropping new files over a running server is easy to do by accident.
 (async () => {
+  // The browser build has no server, so there is nothing to be stale against.
+  // local-api.js sets this synchronously before its top-level await, which is
+  // why it is readable here even though the fetch shim lands a tick later.
+  if (window.__TERMINAL_LOCAL__) return;
   let v = null;
   try { const r = await fetch('/api/version'); if (r.ok) v = await r.json(); } catch { /* old build */ }
   if (v && v.api === API_VERSION) return;
@@ -644,6 +684,7 @@ window.addEventListener('resize', () => { if (state.item) selectItem(state.item,
 
 // first paint
 fetch('/api/state').then(r => r.json()).then(s => {
+  if (s.error) throw new Error(s.error);
   state.flips = s.flips || []; state.bazaar = s.bazaar || { orders: [], crafts: [] };
   state.alerts = s.alerts || []; state.watchlist = s.watchlist || [];
   setStats(s.stats);
@@ -654,4 +695,9 @@ fetch('/api/state').then(r => r.json()).then(s => {
   setInterval(() => fetch('/api/db').then(r => r.json()).then(d => {
     $('s-db').textContent = (d.bytes / 1048576).toFixed(0) + ' MB';
   }), 60000);
+}).catch((e) => {
+  // Better a visible reason than four blank panels.
+  $('flips').innerHTML = '';
+  $('flips').appendChild(el('div', 'empty', `Could not start: ${e.message}`));
+  console.error('[terminal] first paint failed', e);
 });

@@ -1,7 +1,61 @@
 // Serves the same /api/* surface the server build does, from inside the tab, so
 // app.js is byte-identical between the two builds and cannot drift.
+//
+// ORDERING IS THE WHOLE GAME HERE.  index.html loads this module before app.js,
+// but this module has a top-level await (opening IndexedDB).  A module that
+// awaits at top level yields its evaluation slot, so app.js runs to completion
+// FIRST - which means every shim app.js depends on has to be installed
+// synchronously, above the first await, or app.js talks to the real window.
+//
+// app.js does two things at module-evaluation time:
+//   new EventSource('/api/stream')   <- needs the shimmed EventSource
+//   fetch('/api/state')              <- needs the shimmed fetch
+// Installing those after the await is why the page rendered nothing: the real
+// fetch 404'd on Pages, r.json() threw on the HTML error body, and the entire
+// first-paint block died with an unhandled rejection.  Nothing else ran.
+window.__TERMINAL_LOCAL__ = true;
+
 import { Store } from './store.js';
 import { Engine, CONFIG } from './engine.js';
+
+// ---------------------------------------------------------------------------
+// Synchronous section.  Everything above the first await.
+// ---------------------------------------------------------------------------
+
+const listeners = new Set();
+const fan = (type, detail) => { for (const l of listeners) l(type, detail); };
+
+let markReady;
+const ready = new Promise((resolve) => { markReady = resolve; });
+
+// Requests that arrive before the store is open queue on `ready` instead of
+// escaping to the network.  handle() is a hoisted function declaration, so the
+// closure is valid now even though the consts it reads are still in TDZ - it
+// is only ever *called* after markReady().
+const realFetch = window.fetch.bind(window);
+window.fetch = (input, init) => {
+  const url = typeof input === 'string' ? input : (input && input.url) || String(input);
+  if (url.startsWith('/api/') || url.startsWith(location.origin + '/api/')) {
+    return ready.then(() => handle(url, init));
+  }
+  return realFetch(input, init);
+};
+
+// app.js opens an EventSource; give it one backed by the in-tab engine.
+// The constructor must not touch `engine` - it runs before the engine exists.
+window.EventSource = class {
+  constructor() {
+    this.handlers = {};
+    this.readyState = 1;
+    listeners.add((type, detail) => {
+      const h = this.handlers[type];
+      if (h) h({ data: JSON.stringify(detail) });
+    });
+  }
+  addEventListener(type, fn) { this.handlers[type] = fn; }
+  removeEventListener(type) { delete this.handlers[type]; }
+  close() { this.readyState = 2; }
+};
 
 const RANGES = {
   '1h': { ms: 3600e3, bucket: 60e3 }, '6h': { ms: 6 * 3600e3, bucket: 5 * 60e3 },
@@ -9,15 +63,22 @@ const RANGES = {
   '30d': { ms: 30 * 864e5, bucket: 6 * 3600e3 }, all: { ms: Infinity, bucket: 864e5 },
 };
 
+const json = (o) => new Response(JSON.stringify(o), { headers: { 'content-type': 'application/json' } });
+
+// ---------------------------------------------------------------------------
+// Async section.  From here the store and engine exist.
+// ---------------------------------------------------------------------------
+
 const store = await Store.create();
 const engine = new Engine(store);
-const listeners = new Set();
+
 for (const t of ['flips', 'bazaar', 'stats', 'log', 'alert']) {
-  engine.addEventListener(t, (e) => { for (const l of listeners) l(t, e.detail); });
+  engine.addEventListener(t, (e) => fan(t, e.detail));
 }
+// app.js repaints the slow panels on 'tick'; the stats beat is the heartbeat.
+engine.addEventListener('stats', () => fan('tick', {}));
 
 CONFIG.apiKey = localStorage.getItem('hypixelKey') || '';
-const json = (o) => new Response(JSON.stringify(o), { headers: { 'content-type': 'application/json' } });
 
 async function watchRows() { return engine.loadWatchlist(); }
 
@@ -25,8 +86,8 @@ const routes = {
   '/api/version': async () => json({ api: 3, startedAt: Date.now(), pid: 0, mode: 'browser' }),
 
   '/api/state': async () => json({
-    stats: { ...engine.stats, book: engine.book.stats(), warmedUp: engine.warmedUp },
-    flips: engine.recentFlips.slice(0, 80),
+    stats: { ...engine.stats, book: engine.book.stats(), warmedUp: engine.warmedUp, phase: engine.phase(), seed: engine.seedMeta },
+    flips: engine.recentFlips.slice(0, 120),
     bazaar: { orders: engine.lastBazaar.orders.slice(0, 40), crafts: engine.lastBazaar.crafts.slice(0, 40), at: engine.lastBazaar.at },
     alerts: (await store.all('alerts', 60, 'byTs', 'prev')),
     watchlist: await watchRows(),
@@ -47,19 +108,24 @@ const routes = {
     const live = engine.books.get(key);
     const latestBz = bzRows.length ? bzRows[bzRows.length - 1] : null;
     const current = bin.length ? bin[bin.length - 1] : null;
+    // The live wall beats stored history for "what is it right now" - a tab
+    // opened ten seconds ago has a full wall in memory and nothing on disk.
+    const liveWall = engine.book.lowestBin.get(key);
     return json({
       key,
-      kind: current && latestBz ? 'both' : latestBz ? 'bz' : 'ah',
+      kind: (current || liveWall) && latestBz ? 'both' : latestBz && !liveWall ? 'bz' : 'ah',
       current,
-      bzCurrent: latestBz,
+      bzCurrent: latestBz || (live ? { ts: engine.lastBazaar.at, buy_order: live.buyOrder, sell_order: live.sellOrder } : null),
       bin: Store.bucket(bin, r.bucket, x => x.lowest),
       sales: Store.bucket(sales, r.bucket, x => x.price),
       bazaar: Store.bucket(bzRows, r.bucket, x => x.sell_order).map(b => ({ ...b, buy: b.low, sell: b.avg })),
       recentSales: sales.slice(-40).reverse(),
-      wall: current ? { ts: current.ts, depth: current.depth, prices: current.wall || [] } : null,
+      wall: liveWall
+        ? { ts: engine.lastUpdated, depth: liveWall.length, prices: liveWall }
+        : current ? { ts: current.ts, depth: current.depth, prices: current.wall || [] } : null,
       depth: live ? { ts: engine.lastBazaar.at, bids: live.bids, asks: live.asks } : null,
       depthHistory: [],
-      flips: (await store.all('flips')).filter(f => f.keyBase === key).slice(0, 25),
+      flips: engine.recentFlips.filter(f => f.keyBase === key || f.keyVariant === key).slice(0, 25),
     });
   },
 
@@ -118,11 +184,14 @@ const routes = {
         buy_order: l.buy_order, pct: ((l.sell_order - f.sell_order) / f.sell_order) * 100 });
     }
     bzMovers.sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct));
+    // Nothing has two data points in a brand-new tab, so fall back to the live
+    // spread board rather than showing four empty tables for six hours.
     return json({
       movers: movers.slice(0, 40),
       volume: [...volume.values()].map(v => ({ ...v, avg: v.coins / v.sales })).sort((a, b) => b.coins - a.coins).slice(0, 40),
       spreads: engine.lastBazaar.orders.slice(0, 40),
       bzMovers: bzMovers.slice(0, 40),
+      warming: movers.length === 0 && bzMovers.length === 0,
     });
   },
 
@@ -136,9 +205,15 @@ const routes = {
       const step = Math.max(1, Math.ceil(series.length / 48));
       const spark = series.filter((_, i) => i % step === 0);
       const first = series.length ? series[0][1] : null;
-      const last = series.length ? series[series.length - 1][1] : null;
-      rows.push({ ...w, kind: ah.length ? 'ah' : bz.length ? 'bz' : 'none', price: last, first,
-        changePct: first && last ? ((last - first) / first) * 100 : null, spark,
+      let last = series.length ? series[series.length - 1][1] : null;
+      // A watched item with no stored history yet still has a live price.
+      if (last == null) {
+        const liveAh = engine.book.binAt(w.key, 0);
+        const liveBz = engine.books.get(w.key);
+        last = liveAh || (liveBz ? liveBz.sellOrder : null) || null;
+      }
+      rows.push({ ...w, kind: ah.length ? 'ah' : bz.length ? 'bz' : engine.books.has(w.key) ? 'bz' : 'ah',
+        price: last, first, changePct: first && last ? ((last - first) / first) * 100 : null, spark,
         hit: last != null && ((w.below && last <= w.below) || (w.above && last >= w.above)) });
     }
     return json({ tickers: rows });
@@ -167,33 +242,15 @@ async function handle(url, init = {}) {
   if (u.pathname === '/api/alerts/seen' && method === 'POST') return json({ ok: true });
 
   const r = routes[u.pathname];
-  if (r) return r(u);
+  if (r) {
+    try { return await r(u); }
+    catch (e) { return json({ error: String(e && e.message || e) }); }
+  }
   return new Response('not found', { status: 404 });
 }
 
-const realFetch = window.fetch.bind(window);
-window.fetch = (input, init) => {
-  const url = typeof input === 'string' ? input : input.url;
-  if (url.startsWith('/api/')) return handle(url, init);
-  return realFetch(input, init);
-};
-
-// app.js opens an EventSource; give it one backed by the in-tab engine.
-window.EventSource = class {
-  constructor() {
-    this.handlers = {};
-    listeners.add((type, detail) => {
-      const h = this.handlers[type];
-      if (h) h({ data: JSON.stringify(detail) });
-    });
-    engine.addEventListener('stats', () => {
-      const h = this.handlers.tick; if (h) h({ data: '{}' });
-    });
-  }
-  addEventListener(type, fn) { this.handlers[type] = fn; }
-  close() {}
-};
-
 window.__engine = engine;
 window.__store = store;
+
+markReady();
 engine.start();

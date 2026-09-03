@@ -35,6 +35,34 @@ class PriceBook {
     this.lowestBin = new Map();   // key -> [p1, p2, p3] ascending
     this.seenSoldIds = new Set();
     this.lastSnapshotAt = 0;
+    this.seeded = null;           // key -> {n, median} precomputed elsewhere
+    this.seededAt = 0;
+  }
+
+  // --- seed ----------------------------------------------------------------
+  // A cold tab has no sold history and its first auction snapshot is a minute
+  // away, so it has nothing to price against and shows an empty screen. These
+  // let it start from a snapshot someone else already computed (the Actions
+  // collector), and be immediately useful instead of immediately blank.
+  seedWall(wall) {
+    let n = 0;
+    for (const [k, arr] of Object.entries(wall || {})) {
+      if (!Array.isArray(arr) || !arr.length) continue;
+      this.lowestBin.set(k, arr.slice(0, 8));
+      n++;
+    }
+    return n;
+  }
+
+  seedSold(sold, at = Date.now()) {
+    const m = new Map();
+    for (const [k, v] of Object.entries(sold || {})) {
+      const [median, count] = Array.isArray(v) ? v : [v, 1];
+      if (median > 0) m.set(k, { n: count || 1, median });
+    }
+    this.seeded = m.size ? m : null;
+    this.seededAt = at;
+    return m.size;
   }
 
   // --- live BIN wall, rebuilt from scratch every snapshot -------------------
@@ -89,12 +117,20 @@ class PriceBook {
       else this.sold.delete(k);
     }
     if (this.seenSoldIds.size > 200000) this.seenSoldIds.clear();
+    // The seed ages out on the same clock as the live window. Stale medians are
+    // worse than none: they look confident and describe a market that moved.
+    if (this.seeded && Date.now() - this.seededAt > this.windowMs) { this.seeded = null; this.seededAt = 0; }
   }
 
   soldStats(key) {
     const arr = this.sold.get(key);
-    if (!arr || !arr.length) return { n: 0, median: 0 };
-    return { n: arr.length, median: trimmedMedian(arr.map(x => x.price)) };
+    const seed = this.seeded ? this.seeded.get(key) : null;
+    if (!arr || !arr.length) return seed ? { n: seed.n, median: seed.median, seeded: true } : { n: 0, median: 0 };
+    const live = { n: arr.length, median: trimmedMedian(arr.map(x => x.price)) };
+    // A tab that has seen two sales must not throw away a median built from
+    // twenty. Whichever view rests on more actual sales wins.
+    if (seed && seed.n > live.n) return { n: seed.n, median: seed.median, seeded: true };
+    return live;
   }
 
   // --- the actual valuation -------------------------------------------------
@@ -162,6 +198,7 @@ class PriceBook {
       soldKeys: this.sold.size,
       soldSamples: [...this.sold.values()].reduce((a, v) => a + v.length, 0),
       binKeys: this.lowestBin.size,
+      seededKeys: this.seeded ? this.seeded.size : 0,
     };
   }
 }

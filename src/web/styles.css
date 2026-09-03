@@ -68,6 +68,10 @@ td.name > div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tag.lowest-bin{color:var(--series-1);border-color:#24507f}
 .tag.sold-median{color:var(--series-3);border-color:#15583f}
 .tag.attribute{color:var(--warning);border-color:#6b5312}
+.tag.new{color:var(--bg);background:var(--accent);border-color:var(--accent);font-weight:600}
+.tag.seed{color:var(--text-muted);border-style:dashed}
+#s-mode.live{color:var(--accent)}
+#s-mode.seeded{color:var(--warning)}
 .empty{padding:26px 14px;color:var(--text-muted);text-align:center;font-size:12px}
 
 /* ---- charts ---- */

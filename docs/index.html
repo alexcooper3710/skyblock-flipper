@@ -14,6 +14,7 @@
 
 <div id="top">
   <span class="brand"><span class="dot" id="dot"></span>SKYBLOCK TERMINAL</span>
+  <span class="kv" id="s-mode-wrap" title="where the numbers on screen came from">src <b id="s-mode">starting…</b></span>
   <span class="kv">snap <b id="s-snap">—</b></span>
   <span class="kv">auctions <b id="s-auc">—</b></span>
   <span class="kv">cycle <b id="s-cycle">—</b></span>
@@ -39,7 +40,7 @@
         <button data-f="attribute">attr</button>
       </div>
     </div>
-    <div class="pbody" id="flips"><div class="empty">Waiting for the next snapshot…</div></div>
+    <div class="pbody" id="flips"><div class="empty">Starting up…</div></div>
   </section>
 
   <!-- 2. item detail -->
@@ -61,9 +62,9 @@
   <section class="panel">
     <div class="phead"><span class="t">Bazaar</span>
       <div class="seg" id="bz-mode">
-        <button class="on" data-m="orders">flips</button>
+        <button data-m="orders">flips</button>
         <button data-m="crafts">crafts</button>
-        <button data-m="browse">book</button>
+        <button class="on" data-m="browse">book</button>
       </div>
     </div>
     <input id="bz-search" placeholder="filter the book…" autocomplete="off" spellcheck="false" style="display:none">

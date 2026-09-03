@@ -85,6 +85,51 @@ function attributePart(item) {
   return ':' + entries.slice(0, 2).map(([k, v]) => `${k}${v}`).join('+');
 }
 
+// Enchantments are the single biggest thing this used to miss. A clean
+// Terminator and one with Snipe V / Ultimate Wise V are different items with
+// very different prices, and pooling them made every clean copy look like a
+// flip against the enchanted wall. Full sorted signature: it is only ever a
+// Map key, so length costs nothing, and being exact is the entire point.
+function enchantPart(item) {
+  const e = Object.entries(item.enchantments || {});
+  if (!e.length) return '';
+  e.sort((a, b) => a[0].localeCompare(b[0]));
+  return 'e:' + e.map(([k, v]) => `${k}${v}`).join(',');
+}
+
+// Gemstones: quality is what moves the price, slot position does not.
+// ea.gems mixes "JASPER_0": "PERFECT" with "JASPER_0_gem": "JASPER" and an
+// unlocked_slots array, so read only the quality entries.
+function gemPart(item) {
+  const g = item.gems || {};
+  const counts = {};
+  for (const [k, v] of Object.entries(g)) {
+    if (k === 'unlocked_slots' || k.endsWith('_gem')) continue;
+    const q = typeof v === 'string' ? v : (v && v.quality) || null;
+    if (q) counts[q] = (counts[q] || 0) + 1;
+  }
+  const keys = Object.keys(counts).sort();
+  if (!keys.length) return '';
+  return 'g:' + keys.map(q => `${q}${counts[q]}`).join(',');
+}
+
+// Does this item carry anything that moves its price away from a stock copy?
+// If it does, comparing it to the base-level wall is meaningless: that wall is
+// a mix of clean and kitted copies. Strategies use this to refuse to fire
+// rather than to fire against a number they cannot justify.
+function isPlain(item) {
+  if (!item) return false;
+  if (Object.keys(item.enchantments || {}).length) return false;
+  if (Object.keys(item.attributes || {}).length) return false;
+  if (gemPart(item)) return false;
+  if (item.stars || item.recombobulated || item.hotPotato) return false;
+  if (item.abilityScroll && item.abilityScroll.length) return false;
+  if (item.artOfWar || item.artOfPeace || item.woodSingularity || item.tunedTransmission) return false;
+  if (item.enrichment || item.skin) return false;
+  if (item.petInfo && (item.petInfo.heldItem || item.petInfo.skin)) return false;
+  return true;
+}
+
 function variantKey(item) {
   const base = baseKey(item);
   if (!base) return null;
@@ -103,6 +148,17 @@ function variantKey(item) {
   if (item.skin) bits.push(`skin:${item.skin}`);
   const attr = attributePart(item);
   if (attr) bits.push(attr.slice(1));
+  const ench = enchantPart(item);
+  if (ench) bits.push(ench);
+  const gem = gemPart(item);
+  if (gem) bits.push(gem);
+  // A stock copy gets its own marker rather than collapsing onto the base key.
+  // Otherwise the base bucket - which by design holds every copy, kitted ones
+  // included - doubles as the stock bucket, and a plain item ends up priced
+  // against a wall of recombobulated and enchanted copies. That reads as a
+  // discount that is not there, which is the other half of why the auction
+  // numbers were wrong.
+  if (bits.length === 1) bits.push('stock');
   return bits.join('|');
 }
 
@@ -120,10 +176,17 @@ function pricingKeys(item) {
   const base = baseKey(item);
   if (!base) return null;
   const band = petLevelBand(item);
+  const stock = `${base}|stock`;
   return {
+    // base    - every copy of the item, however kitted. Coarse on purpose:
+    //           it is what the charts, search and watchlist group by.
+    // variant - exactly this configuration. The only honest thing to price
+    //           against, and for a stock copy that means `stock`.
     base: band ? `${base}:lv${band}` : base,
     variant: band ? `${variantKey(item)}:lv${band}` : variantKey(item),
+    stock: band ? `${stock}:lv${band}` : stock,
+    plain: isPlain(item),
   };
 }
 
-export { readItem, baseKey, variantKey, pricingKeys, petLevelBand, stripColor, ROMAN };
+export { readItem, baseKey, variantKey, pricingKeys, petLevelBand, stripColor, ROMAN, isPlain, enchantPart, gemPart };

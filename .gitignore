@@ -7,3 +7,5 @@ package-lock.json
 flipper-run.log
 npm-last.log
 data/
+update.tar.gz
+*.tar.gz

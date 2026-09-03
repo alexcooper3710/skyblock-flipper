@@ -1,0 +1,77 @@
+# The server.
+#
+# GitHub Pages serves static files and runs nothing, so the polling that a market
+# terminal needs happens here instead. Every five minutes this collects the
+# bazaar book, the auction wall and the flip board with the same engine code the
+# browser build uses, then force-pushes the result to an orphan `market-data`
+# branch. The page reads that from raw.githubusercontent.com on load, so the
+# markets are on screen immediately instead of after a cold start.
+#
+# Orphan + force-push: the payload is a snapshot, not a history. Replacing the
+# branch every run keeps the repository flat instead of adding ~1MB every five
+# minutes forever. It also never touches `main`, so Pages does not rebuild.
+
+name: market data
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:        # so you can force a refresh from the Actions tab
+
+permissions:
+  contents: write
+
+concurrency:
+  group: market-data
+  cancel-in-progress: false   # let a slow run finish rather than losing the data
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Carry the previous run's sold samples forward so the sold window is
+      # continuous. auctions_ended only ever shows the last ~60 seconds, so
+      # without this the median never has enough samples to mean anything.
+      - name: Fetch the previous snapshot
+        continue-on-error: true
+        run: |
+          git clone --depth 1 --branch market-data \
+            "https://github.com/${GITHUB_REPOSITORY}.git" prev 2>/dev/null || mkdir -p prev
+          ls -la prev || true
+
+      - name: Collect
+        run: node scripts/collect.mjs
+
+      - name: Publish to the market-data branch
+        run: |
+          cd out
+          cp -f "${GITHUB_WORKSPACE}/scripts/market-data-readme.md" README.md 2>/dev/null || true
+          git init -q
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -qb market-data
+          git add -A
+          git commit -qm "market snapshot $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git push -q --force \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" \
+            market-data
+          echo "published $(du -sh . | cut -f1) to market-data"
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f out/meta.json ]; then
+            node -e '
+              const m = require("./out/meta.json");
+              console.log(`| metric | value |\n| --- | --- |`);
+              for (const k of ["generated","tookMs","totalAuctions","binCount","decoded","boardSize","flips","wallKeys","soldKeys","bazaarProducts"])
+                console.log(`| ${k} | ${m[k]} |`);
+            ' >> "$GITHUB_STEP_SUMMARY"
+          fi
