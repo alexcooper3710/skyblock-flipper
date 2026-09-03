@@ -111,6 +111,16 @@ server.listen(0, '127.0.0.1', async () => {
     console.log('PASS shallow-wall movers are excluded');
     console.log('PASS /api/overview', JSON.stringify({ movers: j.movers.length, bzMovers: j.bzMovers.length, topPct: gb.pct.toFixed(1) }));
 
+    r = await get('/api/version');
+    let vj = JSON.parse(r.body);
+    assert.strictEqual(r.status, 200);
+    assert.ok(Number.isInteger(vj.api), 'server must report an api version so a stale process is detectable');
+    const clientVersion = Number(/const API_VERSION = (\d+)/.exec(
+      fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'app.js'), 'utf8'))[1]);
+    assert.strictEqual(vj.api, clientVersion,
+      'client and server API_VERSION must be bumped together, or the banner cries wolf');
+    console.log('PASS api version handshake', JSON.stringify({ api: vj.api }));
+
     r = await get('/api/depth?product=ENCHANTED_DIAMOND');
     assert.strictEqual(r.status, 200, 'depth must not throw when no live book exists');
     console.log('PASS /api/depth survives a collector with no live book');
