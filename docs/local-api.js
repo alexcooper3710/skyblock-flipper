@@ -228,7 +228,14 @@ const routes = {
     const back = Number(u.searchParams.get('since') || 6 * 3600e3);
     const since = Date.now() - back;
     const movers = [], volume = new Map();
+    const seenMover = new Set();
     for (const key of engine.book.lowestBin.keys()) {
+      // Base keys only. One pair of Wither Boots has ninety-odd variant keys -
+      // every enchant combination is its own pool - so a variant-level movers
+      // list is ninety near-identical rows of the same item. "What is moving"
+      // is a question about the item, not about one enchant permutation.
+      if (key.includes('|') || seenMover.has(key)) continue;
+      seenMover.add(key);
       const rows = await store.range('bin', key, since);
       if (rows.length < 2) continue;
       const f = rows[0], l = rows[rows.length - 1];
@@ -243,14 +250,27 @@ const routes = {
       const v = volume.get(s.key) || { key: s.key, sales: 0, coins: 0 };
       v.sales++; v.coins += s.price; volume.set(s.key, v);
     }
+    // The AH movers have had guards since the "+7592%" nonsense; the bazaar
+    // ones never did, and it showed: HARD_STONE 0.1 -> 0.6 read as +500%, and
+    // FACTION_RABBIT_EAGLE as +1533% off a book whose bid was 100k against a
+    // 490m ask. Same guards, for the same reason.
     const bzMovers = [];
-    for (const product of engine.books.keys()) {
+    for (const [product, live] of engine.books) {
       const rows = await store.range('bz', product, since);
       if (rows.length < 2) continue;
       const f = rows[0], l = rows[rows.length - 1];
-      if (!f.sell_order) continue;
+      if (!f.sell_order || !l.sell_order) continue;
+      // Sub-coin products: a tenth of a coin either way is a 100% "move" and
+      // means nothing.
+      if (f.sell_order < 1) continue;
+      // Nobody trades it, so its "price" is one person's wishful order.
+      if (Math.min(live.buyVolWeek || 0, live.sellVolWeek || 0) < 100000) continue;
+      // A bid ten times below the ask is not a market, it is two lonely orders.
+      if (l.buy_order > 0 && l.sell_order > l.buy_order * 10) continue;
+      const pct = ((l.sell_order - f.sell_order) / f.sell_order) * 100;
+      if (!isFinite(pct) || Math.abs(pct) >= 300) continue;
       bzMovers.push({ product, then_price: f.sell_order, now_price: l.sell_order,
-        buy_order: l.buy_order, pct: ((l.sell_order - f.sell_order) / f.sell_order) * 100 });
+        buy_order: l.buy_order, vol: live.sellVolWeek, pct });
     }
     bzMovers.sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct));
     // Nothing has two data points in a brand-new tab, so fall back to the live
