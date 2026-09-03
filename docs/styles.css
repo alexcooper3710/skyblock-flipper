@@ -77,6 +77,8 @@ td.name > div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .num .muted{color:var(--text-muted);opacity:.5}
 .lhead .lsub{float:right;font-weight:400;color:var(--text-muted);text-transform:none;letter-spacing:0}
 .lrow .lo{opacity:.55;font-size:10px;min-width:26px}
+.lrow .lp.lead{font-weight:600;color:var(--text)}
+.lrow .la{opacity:.7}
 .empty{padding:26px 14px;color:var(--text-muted);text-align:center;font-size:12px}
 
 /* ---- charts ---- */

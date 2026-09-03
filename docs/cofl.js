@@ -101,7 +101,24 @@ export async function ahHistory(key, range = '24h') {
     .sort((a, b) => a.t - b.t);
 }
 
-// -> [{t, buy, sell, low, high, n}]
+// Bazaar history -> [{t, buy, sell, low, high, n}]
+//
+// THE TWO SOURCES NAME THE SIDES OPPOSITELY. Verified on live COAL:
+//
+//                       bid side (low)   ask side (high)
+//   Hypixel ladder      sell_summary 6.5  buy_summary 8.9
+//   our top-of-book     buyOrder 6.6      sellOrder 8.8
+//   Coflnet history     sell 6.6          buy 9.0
+//
+// Coflnet's `buy` is what it costs you to BUY (the ask); ours is called
+// sellOrder because it is where you would place a sell offer. Same price level,
+// opposite word. Splicing them without swapping makes the two lines cross and
+// trade places at the seam, which looks exactly like the price inverting
+// halfway through the chart.
+//
+// Output uses OUR convention throughout:
+//   buy  = the bid side  - where you place a buy order, what you get selling
+//   sell = the ask side  - where you place a sell offer, what it costs to buy
 export async function bzHistory(product, range = '24h') {
   if (!product || !/^[A-Z0-9_:;-]+$/.test(product)) return [];
   const want = AH_RANGE[range] || 'week';
@@ -110,10 +127,13 @@ export async function bzHistory(product, range = '24h') {
   if (!Array.isArray(rows)) return [];
   return rows
     .map(r => ({
-      t: utc(r.timestamp), buy: r.buy || 0, sell: r.sell || 0,
-      low: r.minSell ?? r.sell ?? 0, high: r.maxBuy ?? r.buy ?? 0,
+      t: utc(r.timestamp),
+      buy: r.sell || 0,            // their sell price is the bid side
+      sell: r.buy || 0,            // their buy price is the ask side
+      low: r.minSell ?? r.sell ?? 0,
+      high: r.maxBuy ?? r.buy ?? 0,
       n: (r.buyVolume || 0) + (r.sellVolume || 0),
-      avg: r.sell || 0,
+      avg: r.buy || 0,
     }))
     .filter(r => r.t && (r.buy || r.sell))
     .sort((a, b) => a.t - b.t);

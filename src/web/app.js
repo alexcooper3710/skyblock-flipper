@@ -201,10 +201,13 @@ function ladderView(host, depth, title) {
       bar.style.width = ((r.cum / max) * 100).toFixed(1) + '%';
       bar.style.background = colour;
       row.appendChild(bar);
+      // Price is the number you are here for; units and order count are
+      // context. Lead with the price on both sides.
       const px = el('span', 'lp num', exact(r.price));
       const am = el('span', 'la num', fmt(r.amount));
       const or = el('span', 'lo num', r.orders == null ? '' : '×' + r.orders);
       if (align === 'right') row.append(or, am, px); else row.append(px, am, or);
+      px.classList.add('lead');
       row.title = `${exact(r.price)} × ${fmt(r.amount)} units · ${r.orders} order${r.orders === 1 ? '' : 's'} · ${fmt(r.price * r.amount)} coins`;
       col.appendChild(row);
     }
@@ -481,22 +484,42 @@ async function selectItem(key, label) {
     const wrap = el('div', 'chartwrap');
     host.appendChild(wrap);
     lineChart(wrap, [
-      { label: 'lowest BIN', color: CSS('--series-1'), area: true, points: d.bin.map(r => [r.t, r.low]) },
-      { label: 'sold avg', color: CSS('--series-3'), points: d.sales.map(r => [r.t, r.avg]) },
-    ]);
+      { label: 'lowest BIN', color: CSS('--series-1'), area: true, points: d.bin.map(r => [r.t, r.low]).filter(p => p[1] > 0) },
+      { label: 'sold price', color: CSS('--series-3'), points: d.sales.map(r => [r.t, r.avg]).filter(p => p[1] > 0) },
+    ], { height: 200 });
   }
-  if (d.sales.length) {
-    const vw = el('div', 'chartwrap');
-    host.appendChild(vw);
-    barChart(vw, d.sales.map(r => [r.t, r.n]), { color: CSS('--series-3'), yFmt: (n) => Math.round(n), label: 'sales per bucket' });
-  }
+  // Price first, and big. This is a market terminal - the question is what the
+  // thing costs and where it has been, not how many of them changed hands.
   if (d.bazaar.length) {
     const bw = el('div', 'chartwrap');
     host.appendChild(bw);
     lineChart(bw, [
-      { label: 'bz buy order', color: CSS('--series-1'), points: d.bazaar.map(r => [r.t, r.buy]) },
-      { label: 'bz sell order', color: CSS('--series-2'), points: d.bazaar.map(r => [r.t, r.sell]) },
-    ], { height: 140 });
+      // Both series are in OUR convention: buy = the bid side (where you place
+      // a buy order), sell = the ask side (where you list a sell offer).
+      { label: 'sell offer (ask)', color: CSS('--series-2'), points: d.bazaar.map(r => [r.t, r.sell]).filter(p => p[1] > 0) },
+      { label: 'buy order (bid)', color: CSS('--series-1'), points: d.bazaar.map(r => [r.t, r.buy]).filter(p => p[1] > 0) },
+    ], { height: 200 });
+
+    // High, low and spread over whatever the chart is actually showing.
+    const asks = d.bazaar.map(r => r.sell).filter(v => v > 0);
+    const bids = d.bazaar.map(r => r.buy).filter(v => v > 0);
+    if (asks.length && bids.length) {
+      const sp = asks[asks.length - 1] - bids[bids.length - 1];
+      const rng = el('div', 'mini');
+      rng.innerHTML = `<span class="chip">ask high <b>${fmt(Math.max(...asks))}</b></span>
+        <span class="chip">ask low <b>${fmt(Math.min(...asks))}</b></span>
+        <span class="chip">bid high <b>${fmt(Math.max(...bids))}</b></span>
+        <span class="chip">bid low <b>${fmt(Math.min(...bids))}</b></span>
+        <span class="chip">spread now <b>${fmt(sp)}</b> (${bids.at(-1) ? ((sp / bids.at(-1)) * 100).toFixed(1) : '0'}%)</span>`;
+      host.appendChild(rng);
+    }
+  }
+  // Sales-per-bucket is an auction-house statistic. On a bazaar product it is
+  // both empty and beside the point, and it was crowding out the price chart.
+  if (d.sales.length && d.kind !== 'bz') {
+    const vw = el('div', 'chartwrap');
+    host.appendChild(vw);
+    barChart(vw, d.sales.map(r => [r.t, r.n]), { color: CSS('--series-3'), yFmt: (n) => Math.round(n), label: 'auctions sold per bucket' });
   }
 
   if (bz) {
