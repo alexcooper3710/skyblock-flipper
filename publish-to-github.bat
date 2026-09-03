@@ -1,56 +1,57 @@
 @echo off
 setlocal enabledelayedexpansion
-title Publish SkyBlock Terminal to GitHub Pages
+title Publish SkyBlock Terminal
 cd /d "%~dp0"
 
 where git >nul 2>nul
 if errorlevel 1 (
-  echo.
-  echo   Git is not installed. Install it from https://git-scm.com/download/win
-  echo   then run this again. ^(Default options are fine.^)
-  echo.
+  echo.  & echo   Git is not installed: https://git-scm.com/download/win  & echo.
   pause & exit /b 1
 )
 
-echo.
-echo   This publishes the browser build to GitHub Pages.
-echo   Pages is FREE on a public repo - no subscription needed.
-echo   Your data stays on this PC; GitHub only serves the static files.
-echo.
-set /p USER=  Your GitHub username: 
-if "%USER%"=="" (echo   No username given. & pause & exit /b 1)
+REM If a remote is already set we go straight to pushing - re-running this after
+REM a failed push should not send you back through creating the repo again.
+for /f "delims=" %%r in ('git remote get-url origin 2^>nul') do set ORIGIN=%%r
+
+if not defined ORIGIN (
+  set /p USER=  Your GitHub username: 
+  if "!USER!"=="" (echo   No username given. & pause & exit /b 1)
+  echo.
+  echo   If you have not made the repo yet, create it now: name skyblock-flipper,
+  echo   Public, and do NOT tick "Add a README".
+  start "" "https://github.com/new?name=skyblock-flipper&visibility=public"
+  echo   Press any key once the repo exists ^(or if it already did^)...
+  pause >nul
+  git remote add origin https://github.com/!USER!/skyblock-flipper.git
+  for /f "delims=" %%r in ('git remote get-url origin 2^>nul') do set ORIGIN=%%r
+)
 
 echo.
-echo   Opening GitHub so you can create the empty repo.
-echo   Name it: skyblock-flipper    Visibility: Public
-echo   Do NOT tick "Add a README" - the folder already has one.
+echo   Pushing to !ORIGIN!
+echo   A browser window may open to sign you in. There is no token to paste.
 echo.
-start "" "https://github.com/new?name=skyblock-flipper&visibility=public"
-echo   Press any key here once you've clicked "Create repository"...
-pause >nul
-
-git remote remove origin >nul 2>nul
-git remote add origin https://github.com/%USER%/skyblock-flipper.git
+git add -A
+git diff --cached --quiet || git commit -q -m "Local changes"
 git branch -M main
-echo.
-echo   Pushing. A browser window may open to sign you in to GitHub.
-echo.
 git push -u origin main
 if errorlevel 1 (
   echo.
-  echo   Push failed. Most likely the repo name or username does not match,
-  echo   or the repo was created with a README ^(then run: git pull --rebase origin main^)
+  echo   Push failed. Common causes:
+  echo     - the repo was created WITH a README:  git pull --rebase origin main   then run this again
+  echo     - wrong username in the remote:        git remote remove origin        then run this again
   echo.
   pause & exit /b 1
 )
 
+for /f "tokens=4 delims=/" %%u in ("!ORIGIN!") do set GHUSER=%%u
 echo.
-echo   Pushed. One last step, in the browser window opening now:
-echo     Settings  ^>  Pages  ^>  Source: Deploy from a branch
-echo     Branch: main    Folder: /docs    then Save
+echo   Pushed. Last step, in the window opening now:
+echo     Source: "Deploy from a branch"   Branch: main   Folder: /docs   then Save
+echo   ^(If it shows workflow templates instead, the Source dropdown is set to
+echo    "GitHub Actions" - change it to "Deploy from a branch".^)
 echo.
-echo   A minute later your terminal is live at:
-echo     https://%USER%.github.io/skyblock-flipper/
+echo   Then it is live at:  https://!GHUSER!.github.io/skyblock-flipper/
+echo   Open that in Chrome and click Install to get it as a real app.
 echo.
-start "" "https://github.com/%USER%/skyblock-flipper/settings/pages"
+start "" "https://github.com/!GHUSER!/skyblock-flipper/settings/pages"
 pause
