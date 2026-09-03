@@ -74,6 +74,17 @@ lands in both builds or neither.
 To try the browser build against the live API before publishing it:
 `npm run terminal`, then open **http://127.0.0.1:8787/pages/**.
 
+### Publishing it
+
+Double-click **`publish-to-github.bat`**. It needs Git for Windows (not the
+GitHub CLI), asks for your username, opens the page to create the empty repo,
+pushes, and then opens the Pages settings. Sign-in happens in the browser, so
+there is no token to paste anywhere.
+
+Pages is free on a public repo - a subscription is only needed to publish Pages
+from a private one. Nothing runs on GitHub: it serves nine static files and the
+terminal does all its work in your browser, storing data on your own machine.
+
 ## Running the desktop app instead
 
 Windows: double-click **`run-flipper.bat`** — it installs on first run, then launches.
