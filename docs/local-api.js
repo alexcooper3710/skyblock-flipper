@@ -18,6 +18,7 @@ window.__TERMINAL_LOCAL__ = true;
 import { Store } from './store.js';
 import { Engine, CONFIG } from './engine.js';
 import { ahHistory, bzHistory, aggregate, coflTag } from './cofl.js';
+import { craftBoard } from './shared/bazaar.js';
 
 // ---------------------------------------------------------------------------
 // Synchronous section.  Everything above the first await.
@@ -341,6 +342,23 @@ const routes = {
         hit: last != null && ((w.below && last <= w.below) || (w.above && last >= w.above)) };
     }));
     return json({ tickers: rows });
+  },
+
+  // Every bazaar conversion, priced, profitable or not.
+  '/api/crafts': async (u) => {
+    if (!engine.lastProducts) return json({ rows: [], at: 0, waiting: true });
+    const q = (u.searchParams.get('q') || '').trim().toUpperCase();
+    const sort = u.searchParams.get('sort') || 'hourly';
+    let rows = craftBoard(engine.lastProducts, CONFIG);
+    if (q) rows = rows.filter(r => r.id.includes(q) || r.input.includes(q));
+    const by = {
+      hourly: (a, b) => b.hourly - a.hourly,
+      margin: (a, b) => b.marginPct - a.marginPct,
+      per: (a, b) => b.perCraft - a.perCraft,
+      volume: (a, b) => b.outputVolWeek - a.outputVolWeek,
+    };
+    rows.sort(by[sort] || by.hourly);
+    return json({ rows, at: engine.lastBazaar.at, sort });
   },
 
   // What actually changed hands, newest first.

@@ -438,6 +438,68 @@ function craftFlips(products, cfg) {
   return out.sort((a, b) => b.profit - a.profit);
 }
 
+// Every conversion, priced, whether or not it makes money.
+//
+// craftFlips answers "what should I do right now" and so drops everything that
+// does not clear a threshold. That is the wrong shape for a panel you sit and
+// look at: a conversion that is 2% underwater today is worth watching, and one
+// that is wildly negative tells you the input is the thing in demand, not the
+// output. So this returns the whole table with the economics attached and lets
+// the reader decide.
+//
+// Both legs are priced the way you would actually trade them: buy the input by
+// placing an order a tick above the best bid, sell the output a tick under the
+// best ask, with tax on the sale. Pricing the input at the instant-buy price
+// instead would make almost every craft look dead, which is a different lie.
+function craftBoard(products, cfg) {
+  const taxRate = (cfg.bazaar.taxPct ?? 1.25) / 100;
+  const out = [];
+  for (const [outputId, recipe] of Object.entries(RATIOS)) {
+    if (outputId.startsWith('_')) continue;
+    const outP = products[outputId];
+    const inP = products[recipe.input];
+    if (!outP || !inP) continue;
+
+    const outT = topOfBook(outP);
+    const inT = topOfBook(inP);
+    if (!outT.sellOrder || !inT.buyOrder) continue;
+
+    const costPerCraft = inT.buyOrder * recipe.qty;
+    const revenuePerCraft = outT.sellOrder * (1 - taxRate);
+    const perCraft = revenuePerCraft - costPerCraft;
+    const marginPct = costPerCraft > 0 ? (perCraft / costPerCraft) * 100 : 0;
+
+    // What you could actually do in an hour: limited by how fast the input is
+    // supplied, how fast the output is absorbed, and what you can afford.
+    const inHourly = inT.buyVolWeek / (7 * 24);
+    const outHourly = outT.sellVolWeek / (7 * 24);
+    const byInput = recipe.qty > 0 ? inHourly / recipe.qty : 0;
+    const byBudget = costPerCraft > 0 ? cfg.maxBudget / costPerCraft : 0;
+    const crafts = Math.max(0, Math.floor(Math.min(byInput, outHourly, byBudget)));
+
+    out.push({
+      id: outputId, input: recipe.input, qty: recipe.qty,
+      inputPrice: Number(inT.buyOrder.toFixed(1)),
+      outputPrice: Number(outT.sellOrder.toFixed(1)),
+      costPerCraft: Math.round(costPerCraft),
+      revenuePerCraft: Math.round(revenuePerCraft),
+      perCraft: Math.round(perCraft),
+      tax: Math.round(outT.sellOrder * taxRate),
+      marginPct: Number(marginPct.toFixed(2)),
+      crafts,
+      hourly: Math.round(perCraft * crafts),
+      inputVolWeek: inT.buyVolWeek,
+      outputVolWeek: outT.sellVolWeek,
+      // The bottleneck is worth naming: "you cannot get the input" and "nobody
+      // is buying the output" are different problems with different answers.
+      limitedBy: byInput <= outHourly && byInput <= byBudget ? 'input supply'
+        : outHourly <= byBudget ? 'output demand' : 'budget',
+      profitable: perCraft > 0,
+    });
+  }
+  return out.sort((a, b) => b.hourly - a.hourly || b.marginPct - a.marginPct);
+}
+
 // Sanity check the bundled table against whatever the bazaar actually lists.
 function validateRatios(products) {
   const missing = [];
@@ -449,4 +511,4 @@ function validateRatios(products) {
   return missing;
 }
 
-export { orderFlips, craftFlips, topOfBook, ladder, validateRatios, RATIOS, LADDER_LEVELS };
+export { orderFlips, craftFlips, craftBoard, topOfBook, ladder, validateRatios, RATIOS, LADDER_LEVELS };

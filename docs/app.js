@@ -15,7 +15,7 @@ const API_VERSION = 3;
 // Written by scripts/build-web.js. index.html carries the same value and, unlike
 // the JS, is revalidated on every load - so a mismatch means this file came out
 // of the browser cache while the page did not.
-const BUILD = 'd7969316';
+const BUILD = 'b7d2fcb7';
 
 window.__BUILD__ = BUILD;
 
@@ -125,6 +125,7 @@ es.addEventListener('bazaar', (e) => {
   feed.bazaar = JSON.parse(e.data);
   ws.refresh('bazaar');
   ws.refresh('book');
+  ws.refresh('crafts');
 });
 es.addEventListener('stats', (e) => setStats(JSON.parse(e.data)));
 es.addEventListener('alert', (e) => {

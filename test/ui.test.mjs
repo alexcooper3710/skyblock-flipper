@@ -41,6 +41,16 @@ const API = {
   '/api/tickers': { tickers: [] },
   '/api/sold': { sales: [{ name: 'Terminator', key: 'TERMINATOR', price: 520000000, at: Date.now() - 5000 }] },
   '/api/db': { bytes: 62284385 },
+  '/api/crafts': { at: Date.now(), sort: 'hourly', rows: [
+    { id: 'ENCHANTED_COAL', input: 'COAL', qty: 160, inputPrice: 6.6, outputPrice: 1180,
+      costPerCraft: 1056, revenuePerCraft: 1165, perCraft: 109, tax: 15, marginPct: 10.32,
+      crafts: 420, hourly: 45780, inputVolWeek: 6e8, outputVolWeek: 4e6,
+      limitedBy: 'output demand', profitable: true },
+    { id: 'ENCHANTED_BONE', input: 'BONE', qty: 160, inputPrice: 3.1, outputPrice: 480,
+      costPerCraft: 496, revenuePerCraft: 474, perCraft: -22, tax: 6, marginPct: -4.43,
+      crafts: 0, hourly: 0, inputVolWeek: 1e6, outputVolWeek: 2e5,
+      limitedBy: 'input supply', profitable: false },
+  ] },
   // COAL as the live API actually returns it, with enough history for the
   // metrics to have something to chew on.
   '/api/item': { key: 'COAL', kind: 'bz', current: null,
@@ -204,6 +214,27 @@ ok(svgs.length >= 2, `price chart and order chart both drawn (${svgs.length} svg
 const legendText = chartInst.host.textContent;
 ok(legendText.includes('buy orders') && legendText.includes('sell offers'),
   'the order chart labels its two series rather than relying on colour');
+
+// --- crafts panel ----------------------------------------------------------
+ws.open('crafts', {});
+await settle();
+const craftsInst = [...ws.instances.values()].find(i => i.view.kind === 'crafts');
+ok(!!craftsInst, 'the crafts panel mounts');
+let craftRows = craftsInst.host.querySelectorAll('tbody tr');
+ok(craftRows.length === 1, `it shows only profitable conversions by default (${craftRows.length})`);
+ok(craftsInst.host.textContent.includes('ENCHANTED_COAL'), 'and the profitable one is the one shown');
+ok(craftsInst.host.textContent.includes('160 × COAL'), 'the recipe is spelled out on the row');
+ok(craftsInst.host.textContent.includes('capped by output demand'),
+  'the bottleneck is named, not just the number');
+ok(craftsInst.host.textContent.includes('1 of 2 conversions profitable'),
+  'the footer says how much of the table you are not looking at');
+
+craftsInst.view.state.show = 'all';
+await craftsInst.api.refresh();
+await settle();
+craftRows = craftsInst.host.querySelectorAll('tbody tr');
+ok(craftRows.length === 2, 'switching to "all" reveals the losing conversion too');
+ok(craftsInst.host.textContent.includes('-4.4%'), 'and it is shown as a loss rather than hidden');
 
 console.log(fails ? `\n${fails} FAILURE(S)` : '\nALL UI TESTS PASSED');
 process.exit(fails ? 1 : 0);

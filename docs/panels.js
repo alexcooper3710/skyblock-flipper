@@ -806,6 +806,96 @@ export function logPanel(host, view, ws) {
   return { refresh: render };
 }
 
+// --- crafts ----------------------------------------------------------------
+// Every bazaar conversion, priced, whether or not it makes money today. The
+// bazaar panel's "crafts" mode only shows what clears a threshold, which is the
+// wrong shape for something you sit and watch: a conversion 2% underwater is
+// worth knowing about, and one deeply underwater tells you the input is what
+// is in demand, not the output.
+export function craftsPanel(host, view, ws) {
+  const cfg = view.state;
+  cfg.sort = cfg.sort || 'hourly';
+  cfg.show = cfg.show || 'profitable';
+  const { bar, body } = shell(host);
+
+  seg(bar, [['profitable', 'profitable'], ['all', 'all']], cfg.show,
+    (v) => { cfg.show = v; ws.setViewState(view.id, { show: v }); render(); });
+  seg(bar, [['hourly', '/hour'], ['per', '/craft'], ['margin', 'margin'], ['volume', 'volume']], cfg.sort,
+    (v) => { cfg.sort = v; ws.setViewState(view.id, { sort: v }); render(); }).classList.add('sub');
+
+  const search = el('input', 'pfilter');
+  search.placeholder = 'filter by item…';
+  search.value = cfg.q || '';
+  let timer = null;
+  search.oninput = () => {
+    cfg.q = search.value.trim();
+    clearTimeout(timer);
+    timer = setTimeout(() => { ws.setViewState(view.id, { q: cfg.q }); render(); }, 180);
+  };
+  bar.appendChild(search);
+
+  const render = async () => {
+    const r = await fetch(`/api/crafts?sort=${cfg.sort}&q=${encodeURIComponent(cfg.q || '')}`)
+      .then(x => x.json()).catch(() => null);
+    body.textContent = '';
+    if (!r) { body.appendChild(el('div', 'empty', 'Could not load the craft table.')); return; }
+    if (r.waiting) { body.appendChild(el('div', 'empty', 'Waiting for the first bazaar poll…')); return; }
+
+    const rows = cfg.show === 'all' ? r.rows : r.rows.filter(x => x.profitable);
+    if (!rows.length) {
+      body.appendChild(el('div', 'empty', cfg.q
+        ? `No conversion matches "${cfg.q}".`
+        : 'Nothing is profitable to craft at the moment. Switch to "all" to see how far off each one is.'));
+      return;
+    }
+
+    const t = el('table');
+    t.innerHTML = '<thead><tr><th class="stc"></th><th>Craft</th><th class="r">Cost</th>'
+      + '<th class="r">Sells for</th><th class="r">Per craft</th><th class="r">Per hour</th></tr></thead>';
+    const tb = el('tbody');
+    for (const c of rows.slice(0, 200)) {
+      const tr = el('tr');
+      if (feed.item === c.id) tr.className = 'sel';
+
+      const c1 = el('td', 'name');
+      c1.appendChild(el('div', null, c.id));
+      // The recipe and the bottleneck. "You cannot get the input" and "nobody is
+      // buying the output" are different problems with different answers.
+      c1.appendChild(el('div', 'sub',
+        `${fmt(c.qty)} × ${c.input} @ ${exact(c.inputPrice)} · capped by ${c.limitedBy}`));
+
+      const cost = el('td', 'r num', fmt(c.costPerCraft));
+      const rev = el('td', 'r num');
+      rev.innerHTML = `${fmt(c.revenuePerCraft)}<div class="sub">after ${fmt(c.tax)} tax</div>`;
+
+      const per = el('td', 'r num');
+      per.innerHTML = `<span class="${c.perCraft >= 0 ? 'pos' : 'neg'}">${c.perCraft >= 0 ? '+' : ''}${fmt(c.perCraft)}</span>`
+        + `<div class="sub">${c.marginPct >= 0 ? '+' : ''}${c.marginPct.toFixed(1)}%</div>`;
+
+      const hr = el('td', 'r num');
+      hr.innerHTML = c.crafts
+        ? `<span class="${c.hourly >= 0 ? 'pos' : 'neg'}">${c.hourly >= 0 ? '+' : ''}${fmt(c.hourly)}</span>`
+          + `<div class="sub">${fmt(c.crafts)} crafts</div>`
+        : '<span class="muted">—</span><div class="sub">no throughput</div>';
+
+      tr.append(starCell(c.id, c.id), c1, cost, rev, per, hr);
+      tr.onclick = () => ws.open('chart', { key: c.id, label: c.id });
+      tb.appendChild(tr);
+    }
+    t.appendChild(tb);
+    body.appendChild(t);
+
+    const note = el('div', 'mini');
+    const good = r.rows.filter(x => x.profitable).length;
+    note.innerHTML = `<span class="chip">${good} of ${r.rows.length} conversions profitable</span>`
+      + '<span class="chip" title="Input bought by placing an order a tick above the best bid; output sold a tick under the best ask, net of tax. Pricing the input at the instant-buy price instead would make almost every craft look dead.">priced as maker on both legs</span>';
+    body.appendChild(note);
+  };
+
+  render();
+  return { refresh: render };
+}
+
 // --- registry --------------------------------------------------------------
 // title() is what the tab says. Keep it short - tabs get narrow.
 export const REGISTRY = {
@@ -816,6 +906,7 @@ export const REGISTRY = {
   watchlist: { label: 'Watchlist',  title: () => 'Watchlist',    mount: watchlistPanel },
   alerts:    { label: 'Alerts',     title: () => 'Alerts',       mount: alertsPanel },
   book:      { label: 'Order book', title: (s) => s.product ? `Book ${s.product}` : 'Order book', mount: bookPanel },
+  crafts:    { label: 'Crafts',     title: () => 'Crafts',       mount: craftsPanel },
   sold:      { label: 'Sold feed',  title: () => 'Sold',         mount: soldPanel },
   log:       { label: 'Engine log', title: () => 'Log',          mount: logPanel },
 };

@@ -95,6 +95,7 @@ export class Engine extends EventTarget {
     this.seedMeta = null;
     this.firstBoardAt = 0;
     this.refCache = new Map();   // cofl tag -> typical price, from the collector seed
+    this.lastProducts = null;    // raw bazaar payload, for repricing crafts
     this.recentSales = [];       // newest first, for the sold-feed panel
     this.seenSaleIds = new Set();
     this.bzSeries = new Map();   // product -> [sell price per poll], this session
@@ -436,6 +437,10 @@ export class Engine extends EventTarget {
     while (this.running) {
       try {
         const body = await getJson('/skyblock/bazaar');
+        // Keep the raw products: the craft board reprices every conversion on
+        // demand, and doing that from top-of-book alone would lose the volumes
+        // it needs to work out how many crafts an hour actually supports.
+        this.lastProducts = body.products;
         const books = new Map();
         for (const [id, product] of Object.entries(body.products)) books.set(id, topOfBook(product));
 

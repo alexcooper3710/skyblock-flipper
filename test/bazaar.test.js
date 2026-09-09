@@ -7,7 +7,7 @@
 // An earlier version of this file had them the other way round, which is why it
 // happily passed while topOfBook was inverted and no order flip could ever fire.
 const assert = require('assert');
-const { orderFlips, craftFlips, topOfBook, validateRatios, RATIOS } = require('../src/main/engine/bazaar');
+const { orderFlips, craftFlips, craftBoard, topOfBook, validateRatios, RATIOS } = require('../src/main/engine/bazaar');
 const store = require('../src/main/store');
 
 const cfg = {
@@ -114,5 +114,55 @@ const bare = topOfBook({ buy_summary: [{ pricePerUnit: 10, amount: 1, orders: 1 
 assert.strictEqual(bare.sellOffers, 0);
 assert.strictEqual(bare.buyOrders, 0);
 console.log('PASS missing quick_status degrades to zero counts');
+
+// --- the craft board -------------------------------------------------------
+// craftFlips answers "what should I do now" and drops the rest. The board keeps
+// everything, because a conversion slightly underwater is information and an
+// empty panel is not.
+const boardCfg = { ...cfg, maxBudget: 1e9 };
+const first = Object.keys(RATIOS).find(k => !k.startsWith('_'));
+const recipe = RATIOS[first];
+
+// One conversion where the output is worth far more than the input.
+const goodBooks = { [first]: book(4000, 3600, 5e6), [recipe.input]: book(20, 18, 5e7) };
+const board = craftBoard(goodBooks, boardCfg);
+assert.strictEqual(board.length, 1, 'a conversion with both products listed appears once');
+const row = board[0];
+assert.strictEqual(row.input, recipe.input);
+assert.strictEqual(row.qty, recipe.qty);
+// The input is BOUGHT as a maker: a tick above the best bid, so 18 -> 18.1.
+assert.strictEqual(row.costPerCraft, Math.round(18.1 * recipe.qty),
+  'input is bought a tick above the bid, not at the instant-buy price');
+// The output is SOLD a tick under the best ask, minus 1.25% tax.
+assert.strictEqual(row.revenuePerCraft, Math.round(3999.9 * 0.9875),
+  'output is sold a tick under the ask, net of tax');
+assert.strictEqual(row.perCraft, row.revenuePerCraft - row.costPerCraft,
+  'per-craft is exactly revenue minus cost');
+assert.strictEqual(row.profitable, row.perCraft > 0);
+assert.ok(['input supply', 'output demand', 'budget'].includes(row.limitedBy),
+  'the bottleneck is named');
+console.log('PASS craft board prices both legs as a maker:', JSON.stringify({
+  cost: row.costPerCraft, revenue: row.revenuePerCraft, per: row.perCraft, cappedBy: row.limitedBy }));
+
+// A conversion that loses money must still be RETURNED, just flagged - that is
+// the whole difference between this and craftFlips.
+const badBooks = { [first]: book(100, 90, 5e6), [recipe.input]: book(20, 18, 5e7) };
+const bad = craftBoard(badBooks, boardCfg);
+assert.strictEqual(bad.length, 1, 'a losing conversion is still reported');
+assert.ok(bad[0].perCraft < 0 && bad[0].profitable === false, 'and is flagged as a loss');
+assert.strictEqual(craftFlips(badBooks, boardCfg).length, 0, 'while the flip view still drops it');
+console.log('PASS the board keeps losing conversions; the flip view does not');
+
+// A tiny budget throttles throughput without touching the per-craft economics.
+const poor = craftBoard(goodBooks, { ...boardCfg, maxBudget: 1 });
+assert.strictEqual(poor[0].perCraft, row.perCraft, 'budget does not change what each craft earns');
+assert.strictEqual(poor[0].crafts, 0, 'only how many you can do');
+assert.strictEqual(poor[0].limitedBy, 'budget', 'and the bottleneck says so');
+console.log('PASS budget caps throughput, not margin');
+
+// Missing either leg means no row, rather than one priced off half a market.
+assert.strictEqual(craftBoard({ [first]: book(4000, 3600, 5e6) }, boardCfg).length, 0,
+  'a recipe whose input is not on the bazaar is skipped, not priced at zero');
+console.log('PASS a half-listed recipe is skipped rather than half-priced');
 
 console.log('\nALL BAZAAR TESTS PASSED');
