@@ -9,3 +9,6 @@ npm-last.log
 data/
 update.tar.gz
 *.tar.gz
+
+# transfer artefacts, not source
+*.bundle
