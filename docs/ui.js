@@ -158,7 +158,7 @@ export function sparkline(points, { w = 96, h = 26, color } = {}) {
   const X = v => ((v - x0) / (x1 - x0 || 1)) * (w - 4) + 2;
   const Y = v => h - 3 - ((v - y0) / (y1 - y0)) * (h - 6);
   const d = points.map((p, i) => `${i ? 'L' : 'M'}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join('');
-  svg.appendChild(mk('path', { d, fill: 'none', stroke: color, 'stroke-width': 1.5, 'stroke-linejoin': 'round' }));
+  svg.appendChild(mk('path', { d, fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linejoin': 'round' }));
   const last = points.at(-1);
   svg.appendChild(mk('circle', { cx: X(last[0]), cy: Y(last[1]), r: 2.5, fill: color }));
   return svg;

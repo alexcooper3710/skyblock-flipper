@@ -166,6 +166,19 @@ const routes = {
       sales: salesSeries,
       bazaar: bzSeries,
       recentSales: sales.slice(-40).reverse(),
+      // Order counts over time. Only meaningful since the build that started
+      // reading them off quick_status, so it will be short at first and the
+      // panel says so rather than drawing two points and calling it a trend.
+      orders: bzRows
+        .filter(r => r.buy_orders != null || r.sell_offers != null)
+        .map(r => ({ t: r.ts, buyOrders: r.buy_orders || 0, sellOffers: r.sell_offers || 0 })),
+      // The live book, for the numbers that describe right now rather than history.
+      book: live ? {
+        bids: live.bids, asks: live.asks,
+        bidUnits: live.bidUnits, askUnits: live.askUnits,
+        buyOrders: live.buyOrders, sellOffers: live.sellOffers,
+        buyVolWeek: live.buyVolWeek, sellVolWeek: live.sellVolWeek,
+      } : null,
       // What the item normally goes for, across every configuration of it.
       // Context only - it knows nothing about enchants, stars or attributes.
       ref: ref ? { ...ref, source: 'coflnet' } : null,

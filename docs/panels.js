@@ -11,6 +11,10 @@ import {
   el, fmt, pct, exact, ago, CSS, lineChart, barChart, sparkline, ladderView, wallView,
 } from './ui.js';
 import { feed, toggleWatch } from './feed.js';
+import {
+  realizedVol, rangeStats, maxDrawdown, makerEdge, takerCost, bookImbalance,
+  hoursToClear, queueAhead, undercutRoom, sellThroughHours, salesRate,
+} from './metrics.js';
 
 // --- shared bits -----------------------------------------------------------
 function watchStar(key, label) {
@@ -24,6 +28,121 @@ function starCell(key, label) {
   const td = el('td', 'stc');
   td.appendChild(watchStar(key, label));
   return td;
+}
+
+// A stat tile: one number, its name, and the thing you need to know to read it.
+// Deliberately not a chart - a single figure is not a shape, and drawing it as
+// one wastes the space that the figure's caveat should occupy.
+function tile(grid, label, value, { sub = '', tone = '', title = '' } = {}) {
+  const t = el('div', 'stat' + (tone ? ' ' + tone : ''));
+  if (title) t.title = title;
+  t.appendChild(el('div', 'statlab', label));
+  t.appendChild(el('div', 'statval', value));
+  if (sub) t.appendChild(el('div', 'statsub', sub));
+  grid.appendChild(t);
+  return t;
+}
+
+const signed = (n, unit = '%') => (n > 0 ? '+' : '') + n.toFixed(2) + unit;
+const hours = (h) => h == null ? '—' : h < 1 ? Math.round(h * 60) + 'm' : h < 48 ? h.toFixed(1) + 'h' : (h / 24).toFixed(1) + 'd';
+
+// Everything a bazaar product's numbers say, in the order you would ask.
+function bazaarStats(host, d, priceSeries) {
+  const grid = el('div', 'stats');
+  const book = d.book;
+  const edge = makerEdge(book);
+  const cost = takerCost(book);
+  const imb = bookImbalance(book);
+  const vol1 = realizedVol(priceSeries, { perHours: 1 });
+  const vol24 = realizedVol(priceSeries, { perHours: 24 });
+  const rng = rangeStats(priceSeries);
+  const dd = maxDrawdown(priceSeries);
+
+  if (edge) {
+    tile(grid, 'edge / unit', fmt(edge.perUnit), {
+      sub: edge.pct == null ? '' : signed(edge.pct),
+      tone: edge.perUnit > 0 ? 'good' : 'bad',
+      title: `Buy at ${exact(edge.buyAt)}, sell at ${exact(edge.sellAt)}, minus ${exact(edge.tax)} tax. What you make per unit if both orders fill — not the spread, which ignores the tax.`,
+    });
+  }
+  if (cost) {
+    tile(grid, 'spread', fmt(cost.spread), { sub: cost.pct == null ? '' : cost.pct.toFixed(2) + '% of mid',
+      title: 'Bid to ask. What it costs to change your mind immediately.' });
+  }
+  if (vol1 != null) {
+    tile(grid, 'volatility', vol1.toFixed(2) + '%/h', {
+      sub: vol24 == null ? '' : vol24.toFixed(1) + '%/day',
+      title: 'Standard deviation of log returns, scaled to an hour. Roughly how far the price wanders in either direction — bigger means your resting order is likelier to be run over.',
+    });
+  }
+  if (rng) {
+    tile(grid, 'range', `${fmt(rng.min)} – ${fmt(rng.max)}`, {
+      sub: `now ${(rng.position * 100).toFixed(0)}% up the band`,
+      title: 'Low and high across the window shown, and where the current price sits between them. A price that feels low is not the same as one that is.',
+    });
+  }
+  if (dd != null) tile(grid, 'max drawdown', '-' + dd.toFixed(1) + '%', {
+    tone: dd > 25 ? 'bad' : '', title: 'The worst peak-to-trough fall inside the window — the hole you would have sat through.' });
+
+  if (imb) {
+    const pct = imb.imbalance * 100;
+    tile(grid, 'book skew', signed(pct, '%'), {
+      sub: pct > 0 ? 'bid-heavy' : 'ask-heavy',
+      tone: '',
+      title: `${fmt(imb.bidUnits)} units bid against ${fmt(imb.askUnits)} offered. Positive means buyers are queued deeper than sellers. Totals come from quick_status, not the truncated ladder.`,
+    });
+  }
+  if (book) {
+    tile(grid, 'orders', `${fmt(book.buyOrders)} / ${fmt(book.sellOffers)}`, {
+      sub: 'buy / sell', title: 'How many orders actually exist on each side. The visible ladder is truncated and shows fewer.' });
+    const clearBid = hoursToClear(imb && imb.askUnits, book.sellVolWeek);
+    if (clearBid != null) tile(grid, 'clears in', hours(clearBid), {
+      sub: `${fmt(book.sellVolWeek)}/wk`,
+      title: 'How long the resting sell side would take to clear at the recent rate of trade. A tight spread on a book that takes days to clear is not a liquid market.' });
+    const q = queueAhead(book.bids, edge ? edge.buyAt - 0.1 : null);
+    if (q != null) tile(grid, 'queue ahead', fmt(q), { sub: 'units at the touch',
+      title: 'Size sitting in front of you at the best bid — what has to trade before your order does.' });
+  }
+  if (grid.children.length) host.appendChild(grid);
+}
+
+// The auction-house equivalents. Different market, different questions.
+function auctionStats(host, d, priceSeries) {
+  const grid = el('div', 'stats');
+  const wall = d.wall && d.wall.prices;
+  const room = undercutRoom(wall);
+  const vol = realizedVol(priceSeries, { perHours: 24 });
+  const rng = rangeStats(priceSeries);
+  const rate = salesRate(d.sales);
+
+  if (d.current || wall) {
+    const low = wall && wall[0];
+    if (low) tile(grid, 'lowest BIN', fmt(low), { sub: `${(d.wall.depth || wall.length)} listed`,
+      title: 'The cheapest copy on the market right now, and how many are listed behind it.' });
+  }
+  if (room) {
+    tile(grid, 'undercut room', fmt(room.gap), { sub: signed(room.pct),
+      tone: room.pct > 20 ? 'good' : '',
+      title: 'Gap between the cheapest listing and the next one up. Thin room means you compete on price immediately; wide room means the cheapest is genuinely mispriced rather than merely first.' });
+  }
+  if (d.ref && d.ref.median) {
+    tile(grid, 'typical sale', fmt(d.ref.median), {
+      sub: d.ref.volume ? `${fmt(d.ref.volume)} traded` : '',
+      title: 'What this item usually goes for, across every configuration of it. Per item ID, so it knows nothing about enchants or stars — context, not a valuation.' });
+  }
+  if (vol != null) tile(grid, 'volatility', vol.toFixed(1) + '%/day', {
+    title: 'Standard deviation of log returns, scaled to a day. How much the price moves regardless of direction.' });
+  if (rng) tile(grid, 'range', `${fmt(rng.min)} – ${fmt(rng.max)}`, {
+    sub: `now ${(rng.position * 100).toFixed(0)}% up the band`,
+    title: 'Low and high across the window shown, and where it sits between them.' });
+  if (rate != null) {
+    tile(grid, 'sales rate', rate.toFixed(1) + '/h', { title: 'Observed sales per hour across the window.' });
+    const through = sellThroughHours(d.wall && d.wall.depth, rate);
+    if (through != null) tile(grid, 'sell-through', hours(through), {
+      sub: 'to clear the wall',
+      title: 'How long the listings currently up would take to sell at that rate. Long means your copy waits behind them.' });
+  }
+  if (grid.children.length) host.appendChild(grid);
 }
 
 // A control strip above the panel body. Controls belong to the panel, not to
@@ -362,6 +481,15 @@ export function chartPanel(host, view, ws) {
       { label: 'sold price', color: CSS('--series-3'), points: d.sales.map(r => [r.t, r.avg]).filter(p => p[1] > 0) },
     ], { height: 200 });
   }
+  // The numbers, above the charts. A chart shows you a shape; these answer the
+  // questions the shape does not - what the edge is after tax, how hard the
+  // thing moves, how long you would wait.
+  const priceSeries = d.bazaar.length
+    ? d.bazaar.map(r => [r.t, r.sell]).filter(p => p[1] > 0)
+    : d.bin.map(r => [r.t, r.low]).filter(p => p[1] > 0);
+  if (d.book) bazaarStats(host, d, priceSeries);
+  else auctionStats(host, d, priceSeries);
+
   // Price first, and big. This is a market terminal - the question is what the
   // thing costs and where it has been, not how many of them changed hands.
   if (d.bazaar.length) {
@@ -388,6 +516,22 @@ export function chartPanel(host, view, ws) {
       host.appendChild(rng);
     }
   }
+  // How many orders sit on each side, over time. Order count moving while price
+  // does not is the wall being built or pulled, which is the thing you want to
+  // catch before it moves the price.
+  if (d.orders && d.orders.length >= 2) {
+    const ow = el('div', 'chartwrap');
+    host.appendChild(ow);
+    lineChart(ow, [
+      { label: 'buy orders', color: CSS('--series-1'), points: d.orders.map(r => [r.t, r.buyOrders]) },
+      { label: 'sell offers', color: CSS('--series-2'), points: d.orders.map(r => [r.t, r.sellOffers]) },
+    ], { height: 120, yFmt: (n) => Math.round(n).toLocaleString() });
+  } else if (d.book) {
+    const note = el('div', 'mini');
+    note.innerHTML = '<span class="chip">order counts over time start collecting once this tab has run a few minutes</span>';
+    host.appendChild(note);
+  }
+
   // Sales-per-bucket is an auction-house statistic. On a bazaar product it is
   // both empty and beside the point, and it was crowding out the price chart.
   if (d.sales.length && d.kind !== 'bz') {

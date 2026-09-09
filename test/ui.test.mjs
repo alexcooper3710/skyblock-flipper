@@ -41,9 +41,19 @@ const API = {
   '/api/tickers': { tickers: [] },
   '/api/sold': { sales: [{ name: 'Terminator', key: 'TERMINATOR', price: 520000000, at: Date.now() - 5000 }] },
   '/api/db': { bytes: 62284385 },
+  // COAL as the live API actually returns it, with enough history for the
+  // metrics to have something to chew on.
   '/api/item': { key: 'COAL', kind: 'bz', current: null,
-    bzCurrent: { buy_order: 6.6, sell_order: 8.8, instant_buy: 9.53, instant_sell: 6.43, buy_vol_week: 1, sell_vol_week: 2 },
-    bin: [], sales: [], bazaar: [ { t: Date.now() - 7200e3, buy: 6.4, sell: 8.9 }, { t: Date.now(), buy: 6.6, sell: 8.8 } ],
+    bzCurrent: { buy_order: 6.6, sell_order: 8.8, instant_buy: 9.53, instant_sell: 6.43,
+      buy_vol_week: 55396322, sell_vol_week: 627855825, buy_orders: 180, sell_offers: 648 },
+    bin: [], sales: [],
+    bazaar: Array.from({ length: 24 }, (_, i) => ({
+      t: Date.now() - (23 - i) * 3600e3, buy: 6.4 + (i % 3) * 0.1, sell: 8.7 + (i % 4) * 0.15 })),
+    orders: Array.from({ length: 12 }, (_, i) => ({
+      t: Date.now() - (11 - i) * 300e3, buyOrders: 170 + i * 2, sellOffers: 640 + (i % 5) * 4 })),
+    book: { bids: [{ price: 6.5, amount: 65780, orders: 1 }], asks: [{ price: 8.9, amount: 19457, orders: 1 }],
+      bidUnits: 11575680, askUnits: 42124272, buyOrders: 180, sellOffers: 648,
+      buyVolWeek: 55396322, sellVolWeek: 627855825 },
     recentSales: [], ref: null, history: { ah: 'none', bz: 'coflnet', tag: 'COAL' },
     wall: null, depth: null, depthHistory: [], flips: [] },
   '/api/depth': { product: 'COAL', live: { bids: [{ price: 6.5, amount: 100, orders: 3 }], asks: [{ price: 8.9, amount: 90, orders: 1 }], buyOrders: 180, sellOffers: 648 } },
@@ -160,6 +170,40 @@ const bazaarViews = [...ws.instances.values()].filter(i => i.view.kind === 'baza
 ok(bazaarViews.length === 2, 'the same panel kind can be open twice');
 bazaarViews[0].view.state.bzSort = 'movers';
 ok(bazaarViews[1].view.state.bzSort !== 'movers', 'and they keep separate settings');
+
+// --- the financial numbers actually reach the screen ------------------------
+ws.reset();
+await settle();
+ws.open('chart', { key: 'COAL', label: 'COAL' });
+await settle();
+const chartInst = [...ws.instances.values()].find(i => i.view.kind === 'chart' && i.view.state.key === 'COAL');
+const tiles = [...chartInst.host.querySelectorAll('.stat')].map(t => ({
+  label: t.querySelector('.statlab').textContent,
+  value: t.querySelector('.statval').textContent,
+  sub: (t.querySelector('.statsub') || {}).textContent || '',
+}));
+ok(tiles.length >= 6, `the stat strip renders (${tiles.length} tiles)`);
+const byLabel = Object.fromEntries(tiles.map(t => [t.label, t]));
+ok(byLabel['edge / unit'], 'edge per unit is one of them');
+ok(byLabel['volatility'] && /%\/h$/.test(byLabel['volatility'].value), 'volatility is quoted per hour');
+ok(byLabel['book skew'] && byLabel['book skew'].sub === 'ask-heavy', 'book skew names the heavy side rather than only colouring it');
+ok(byLabel['orders'] && byLabel['orders'].value === '180 / 648', 'true order counts, not the truncated ladder');
+// Spread is bid to ask at the touch (8.9 - 6.5), NOT the inside prices you
+// would place at (8.8 - 6.6) - that second number is the edge, and it is
+// smaller because the tax comes out of it. Two different questions, two tiles.
+ok(byLabel['spread'] && byLabel['spread'].value === '2.40', 'spread is measured at the touch, with its decimals intact');
+ok(byLabel['edge / unit'].value === '2.09', 'and edge is the post-tax number, visibly not the same thing');
+// Every tile must carry an explanation - these are numbers someone might trade on.
+const untitled = [...chartInst.host.querySelectorAll('.stat')].filter(t => !t.title);
+ok(untitled.length === 0, `every tile explains itself (${untitled.length} without a tooltip)`);
+console.log('  tiles: ' + tiles.map(t => `${t.label}=${t.value}`).join('  '));
+
+// And the order-count chart is drawn, with a legend naming both series.
+const svgs = chartInst.host.querySelectorAll('svg');
+ok(svgs.length >= 2, `price chart and order chart both drawn (${svgs.length} svgs)`);
+const legendText = chartInst.host.textContent;
+ok(legendText.includes('buy orders') && legendText.includes('sell offers'),
+  'the order chart labels its two series rather than relying on colour');
 
 console.log(fails ? `\n${fails} FAILURE(S)` : '\nALL UI TESTS PASSED');
 process.exit(fails ? 1 : 0);

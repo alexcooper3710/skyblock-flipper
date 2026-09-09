@@ -250,3 +250,18 @@ body.ws-dragging{user-select:none}
 .bootfail{background:var(--critical);color:#fff;padding:8px 12px;font-size:12px}
 .ticker .tsides{white-space:nowrap;opacity:.85}
 .ticker .tsides b{color:var(--text-secondary);font-weight:600}
+
+/* stat tiles — a single figure is not a shape, so it is not drawn as one.
+   Values wear text tokens; only signed edge takes a status colour, and it is
+   always paired with a sign so the meaning is never colour alone. */
+.stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:1px;
+  background:var(--line);border-bottom:1px solid var(--line)}
+.stat{background:var(--surface-0);padding:6px 9px 7px;min-width:0}
+.statlab{font-size:9.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--text-muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.statval{font-size:15px;font-weight:600;color:var(--text-primary);
+  font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.statsub{font-size:10px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat.good .statval{color:var(--good)}
+.stat.bad .statval{color:var(--critical)}
+.stat[title]{cursor:help}
