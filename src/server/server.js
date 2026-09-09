@@ -6,7 +6,9 @@ const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
 
-const WEB = path.join(__dirname, '..', 'web');
+// One UI, in docs/. The server build differs only in its index (no in-tab
+// engine), which scripts/build-web.js generates as index.server.html.
+const WEB = path.join(__dirname, '..', '..', 'docs');
 const DOCS = path.join(__dirname, '..', '..', 'docs');
 
 // Bumped whenever the API surface changes. Static files are read from disk per
@@ -103,6 +105,14 @@ function createServer({ store, collector, cfg }) {
     }
 
     if (p === '/api/db') return json(res, 200, store.stats());
+
+    // The sold tape. The UI is shared with the browser build, so this has to
+    // exist here too or the panel just 404s.
+    if (p === '/api/sold') {
+      const limit = Math.min(400, Number(u.searchParams.get('limit') || 200) || 200);
+      const rows = store.all('SELECT key, price, ts FROM sales ORDER BY ts DESC LIMIT ?', limit);
+      return json(res, 200, { sales: rows.map(r => ({ name: r.key, key: r.key, price: r.price, at: r.ts })), at: Date.now() });
+    }
 
     if (p === '/api/version') {
       return json(res, 200, { api: API_VERSION, startedAt: START, pid: process.pid });
@@ -272,7 +282,7 @@ function createServer({ store, collector, cfg }) {
     const onPages = p === '/pages' || p.startsWith('/pages/');
     const root = onPages ? DOCS : WEB;
     const rel = onPages ? p.replace(/^\/pages\/?/, '') : p.replace(/^\/+/, '');
-    const file = (!rel || rel === '') ? 'index.html' : rel;
+    const file = (!rel || rel === '') ? (onPages ? 'index.html' : 'index.server.html') : rel;
     const full = path.join(root, file);
     if (!full.startsWith(root)) return json(res, 403, { error: 'nope' });
     fs.readFile(full, (err, buf) => {

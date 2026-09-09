@@ -76,6 +76,8 @@ export class Engine extends EventTarget {
     this.seedMeta = null;
     this.firstBoardAt = 0;
     this.refCache = new Map();   // cofl tag -> typical price, from the collector seed
+    this.recentSales = [];       // newest first, for the sold-feed panel
+    this.seenSaleIds = new Set();
     this.bzSeries = new Map();   // product -> [sell price per poll], this session
     this.bzSeriesStep = 60000;
     this.lastBazaar = { orders: [], crafts: [], at: 0 };
@@ -355,16 +357,35 @@ export class Engine extends EventTarget {
     while (this.running) {
       try {
         const body = await getJson('/skyblock/auctions_ended');
-        const rows = (await mapPool(body.auctions || [], 12, async (s) => {
+        const decoded = (await mapPool(body.auctions || [], 12, async (s) => {
           try {
-            const keys = pricingKeys(readItem(await decodeItemBytes(s.item_bytes)));
+            const item = readItem(await decodeItemBytes(s.item_bytes));
+            const keys = pricingKeys(item);
             if (!keys) return null;
-            return [...new Set([keys.variant, keys.base].filter(Boolean))]
-              .map(k => ({ key: k, price: s.price, at: s.timestamp, auctionId: `${s.auction_id}:${k}` }));
+            return { s, item, keys };
           } catch { return null; }
-        })).filter(Boolean).flat();
+        })).filter(Boolean);
+
+        const rows = decoded.flatMap(({ s, keys }) =>
+          [...new Set([keys.variant, keys.base].filter(Boolean))]
+            .map(k => ({ key: k, price: s.price, at: s.timestamp, auctionId: `${s.auction_id}:${k}` })));
         this.book.addSales(rows);
         if (rows.length) await this.store.writeSales(rows);
+
+        // A tape of what actually changed hands. The flip board says what an
+        // item is worth; this says what somebody actually paid, with the item's
+        // name attached - auctions_ended carries no name, only the bytes, so it
+        // has to be kept here while the decode is in hand.
+        const fresh = decoded
+          .filter(({ s }) => !this.seenSaleIds.has(s.auction_id))
+          .map(({ s, item, keys }) => {
+            this.seenSaleIds.add(s.auction_id);
+            return { name: item.name || keys.base, key: keys.base, price: s.price, at: s.timestamp, bin: !!s.bin };
+          });
+        if (fresh.length) {
+          this.recentSales = [...fresh.sort((a, b) => b.at - a.at), ...this.recentSales].slice(0, 400);
+          if (this.seenSaleIds.size > 5000) this.seenSaleIds = new Set([...this.seenSaleIds].slice(-2000));
+        }
       } catch (e) { this.log('warn', `sold feed: ${e.message}`); }
       await this.sleep(20000);
     }

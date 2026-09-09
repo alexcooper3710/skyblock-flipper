@@ -168,3 +168,85 @@ th.stc,td.stc{width:22px;padding-left:6px;padding-right:0}
 
 #stale{background:#3a2a10;border-bottom:1px solid var(--warning);color:var(--warning);
   padding:7px 12px;font-size:12.5px;font-weight:600;text-align:center}
+
+/* ---------------------------------------------------------------- workspace
+   The tiling layout. Splits are CSS grids whose tracks come straight from the
+   fractions in the layout tree, so resizing is one style write rather than a
+   re-render - which matters, because a re-render would remount every panel and
+   throw away scroll positions mid-drag. */
+#workspace{height:calc(100% - 38px);background:var(--line)}
+.ws-split{display:grid;height:100%;width:100%;min-width:0;min-height:0}
+.ws-panel{background:var(--surface-0);display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
+.ws-panel.focus .ws-tabs{background:var(--surface-2, var(--surface-1))}
+.ws-panel.focus{box-shadow:inset 0 0 0 1px var(--line)}
+
+/* dividers — thin, but the whole 5px is grabbable */
+.ws-div{background:var(--line);position:relative}
+.ws-div::after{content:"";position:absolute;inset:-3px}
+.ws-div-row{cursor:col-resize}
+.ws-div-col{cursor:row-resize}
+.ws-div:hover,.ws-div.dragging{background:var(--accent)}
+body.ws-resizing{cursor:col-resize;user-select:none}
+body.ws-dragging{user-select:none}
+
+/* tab strip */
+.ws-tabs{display:flex;align-items:stretch;gap:1px;background:var(--surface-1);
+  border-bottom:1px solid var(--line);flex:0 0 auto;min-height:26px}
+.ws-tab{display:flex;align-items:center;gap:4px;padding:0 8px;cursor:grab;
+  font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);
+  border-right:1px solid var(--line);max-width:180px;white-space:nowrap}
+.ws-tab:hover{color:var(--text-secondary)}
+.ws-tab.on{background:var(--surface-0);color:var(--text-secondary);font-weight:700;
+  box-shadow:inset 0 2px 0 var(--accent)}
+.ws-tabname{overflow:hidden;text-overflow:ellipsis}
+.ws-x{background:none;border:0;color:var(--text-muted);cursor:pointer;font-size:13px;
+  line-height:1;padding:0 1px;opacity:0}
+.ws-tab:hover .ws-x,.ws-tab.on .ws-x{opacity:.6}
+.ws-x:hover{opacity:1;color:var(--critical)}
+.ws-tabfill{flex:1;min-width:8px}
+.ws-btn{background:none;border:0;color:var(--text-muted);cursor:pointer;font-size:14px;
+  padding:0 8px;line-height:1}
+.ws-btn:hover{color:var(--accent)}
+.ws-body{flex:1;min-height:0;display:flex}
+.ws-view{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
+
+/* panel-local controls: each panel owns its filters, so two bazaar panels can
+   be sorted differently at the same time */
+.pctl{display:flex;align-items:center;gap:6px;padding:4px 8px;flex:0 0 auto;
+  border-bottom:1px solid var(--line);background:var(--surface-0);flex-wrap:wrap}
+.pctl:empty{display:none}
+.pctl .seg{margin-left:0}
+.pfilter{background:var(--surface-1);border:1px solid var(--line);color:var(--text);
+  border-radius:4px;padding:2px 7px;font-size:11px;font-family:inherit;min-width:120px;flex:1}
+.pfilter:focus{outline:none;border-color:var(--accent)}
+
+/* drag feedback */
+.ws-ghost{position:fixed;left:0;top:0;z-index:900;pointer-events:none;
+  background:var(--surface-2, var(--surface-1));border:1px solid var(--accent);
+  color:var(--text);padding:3px 9px;border-radius:4px;font-size:11px;
+  text-transform:uppercase;letter-spacing:.6px}
+.ws-hint{position:fixed;z-index:890;pointer-events:none;background:rgba(12,163,12,.14);
+  border:1px solid var(--accent);border-radius:2px}
+
+/* add-panel menu */
+.ws-menu{position:fixed;z-index:950;background:var(--surface-1);border:1px solid var(--line);
+  border-radius:6px;min-width:190px;padding:4px;box-shadow:0 12px 32px rgba(0,0,0,.5)}
+.ws-menuhead{font-size:10px;text-transform:uppercase;letter-spacing:.7px;
+  color:var(--text-muted);padding:5px 8px 3px}
+.ws-menuitem{display:block;width:100%;text-align:left;background:none;border:0;
+  color:var(--text-secondary);font-family:inherit;font-size:12px;padding:5px 8px;
+  border-radius:4px;cursor:pointer}
+.ws-menuitem:hover{background:var(--surface-0);color:var(--accent)}
+.ws-menufoot{font-size:10px;color:var(--text-muted);padding:6px 8px 3px;
+  border-top:1px solid var(--line);margin-top:4px;line-height:1.4}
+
+/* engine log */
+.logbox{font-size:11px;line-height:1.5;padding:4px 0}
+.logline{display:flex;gap:8px;padding:1px 10px;white-space:pre-wrap;word-break:break-word}
+.logline .logt{color:var(--text-muted);flex:0 0 auto;opacity:.7}
+.logline.warn .logm{color:var(--warning)}
+.logline.error .logm{color:var(--critical)}
+
+.bootfail{background:var(--critical);color:#fff;padding:8px 12px;font-size:12px}
+.ticker .tsides{white-space:nowrap;opacity:.85}
+.ticker .tsides b{color:var(--text-secondary);font-weight:600}

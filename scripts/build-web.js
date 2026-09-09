@@ -42,10 +42,13 @@ for (const m of MODULES) {
   console.log('built docs/shared/' + m);
 }
 
-// The UI is identical in both builds; copy rather than fork it.
-const WEB = path.join(__dirname, '..', 'src', 'web');
+// The UI now lives in docs/ only - one copy, no fork to drift. The server build
+// serves the same files; it just needs an index that does NOT load local-api.js,
+// because it has a real server to talk to instead of an engine in the tab.
 const DOCS = path.join(__dirname, '..', 'docs');
-for (const f of ['styles.css', 'app.js']) {
-  fs.copyFileSync(path.join(WEB, f), path.join(DOCS, f));
-  console.log('copied docs/' + f);
-}
+const index = fs.readFileSync(path.join(DOCS, 'index.html'), 'utf8');
+const serverIndex = index.replace(/^.*<script type="module" src="local-(api|extras)\.js"><\/script>\n?/gm, '');
+if (serverIndex === index) throw new Error('index.html: expected local-api/local-extras script tags to strip');
+fs.writeFileSync(path.join(DOCS, 'index.server.html'),
+  serverIndex.replace('<head>', '<head>\n<!-- GENERATED from index.html by scripts/build-web.js - do not edit. -->'));
+console.log('built docs/index.server.html');

@@ -316,11 +316,24 @@ const routes = {
       const liveBz = engine.books.get(w.key);
       const live = liveAh || (liveBz ? liveBz.sellOrder : 0);
       if (live) last = live;
-      return { ...w, kind: isBz ? 'bz' : 'ah', source, price: last ?? null, first,
+      // Both sides of the market, not a single number. On the bazaar that is
+      // the bid and the ask; on the auction house it is the cheapest listing
+      // and the one above it, which is what you would actually have to undercut.
+      const book = engine.books.get(w.key);
+      const sides = book
+        ? { buy: book.buyOrder || null, sell: book.sellOrder || null, spread: (book.sellOrder && book.buyOrder) ? book.sellOrder - book.buyOrder : null }
+        : { buy: engine.book.binAt(w.key, 0) || null, sell: engine.book.binAt(w.key, 1) || null, spread: null, depth: engine.book.binDepth(w.key) };
+      return { ...w, kind: isBz ? 'bz' : 'ah', source, price: last ?? null, first, ...sides,
         changePct: first && last ? ((last - first) / first) * 100 : null, spark,
         hit: last != null && ((w.below && last <= w.below) || (w.above && last >= w.above)) };
     }));
     return json({ tickers: rows });
+  },
+
+  // What actually changed hands, newest first.
+  '/api/sold': async (u) => {
+    const limit = Math.min(400, Number(u.searchParams.get('limit') || 200));
+    return json({ sales: engine.recentSales.slice(0, limit), at: Date.now() });
   },
 
   '/api/depth': async (u) => {
