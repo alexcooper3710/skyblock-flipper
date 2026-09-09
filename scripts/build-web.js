@@ -52,3 +52,40 @@ if (serverIndex === index) throw new Error('index.html: expected local-api/local
 fs.writeFileSync(path.join(DOCS, 'index.server.html'),
   serverIndex.replace('<head>', '<head>\n<!-- GENERATED from index.html by scripts/build-web.js - do not edit. -->'));
 console.log('built docs/index.server.html');
+
+// --- build stamp -----------------------------------------------------------
+// GitHub Pages serves JS and CSS with max-age=600, so for ten minutes after a
+// push a plain reload can hand you a MIX: a fresh index.html next to a stale
+// panels.js. With ES modules that is worse than being wholly out of date, and
+// from the outside it just looks like the deploy did not work.
+//
+// index.html revalidates, so it is the one file that can be trusted to be
+// current. Stamp the build id into it and into app.js: if the two disagree, the
+// browser is holding a cached copy of the code and the page says so instead of
+// leaving you to wonder.
+const crypto = require('crypto');
+const stampFiles = fs.readdirSync(DOCS)
+  .filter(f => f.endsWith('.js') || f === 'styles.css')
+  .sort();
+const hash = crypto.createHash('sha256');
+for (const f of stampFiles) {
+  // The stamp lines themselves are excluded, or the hash could never settle.
+  hash.update(f);
+  hash.update(fs.readFileSync(path.join(DOCS, f), 'utf8').replace(/^const BUILD = '[^']*';$/m, ''));
+}
+for (const f of fs.readdirSync(path.join(DOCS, 'shared')).sort()) {
+  hash.update(fs.readFileSync(path.join(DOCS, 'shared', f), 'utf8'));
+}
+const BUILD = hash.digest('hex').slice(0, 8);
+
+const stamp = (file, re, make) => {
+  const full = path.join(DOCS, file);
+  const before = fs.readFileSync(full, 'utf8');
+  const after = re.test(before) ? before.replace(re, make) : null;
+  if (after == null) throw new Error(`${file}: no build stamp to replace`);
+  if (after !== before) fs.writeFileSync(full, after);
+};
+stamp('index.html', /<meta name="build" content="[^"]*">/, `<meta name="build" content="${BUILD}">`);
+stamp('index.server.html', /<meta name="build" content="[^"]*">/, `<meta name="build" content="${BUILD}">`);
+stamp('app.js', /^const BUILD = '[^']*';$/m, `const BUILD = '${BUILD}';`);
+console.log('stamped build ' + BUILD);

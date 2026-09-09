@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="build" content="9a8638e7">
 <title>SkyBlock Terminal</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%230ca30c'/%3E%3Cpath d='M16 8l7 12H9z' fill='%2306240f'/%3E%3C/svg%3E">
 <link rel="manifest" href="manifest.webmanifest">
@@ -14,6 +15,7 @@
 
 <div id="top">
   <span class="brand"><span class="dot" id="dot"></span>SKYBLOCK TERMINAL</span>
+  <span class="kv" title="which build of the page you are running">v <b id="s-build">—</b></span>
   <span class="kv" id="s-mode-wrap" title="where the numbers on screen came from">src <b id="s-mode">starting…</b></span>
   <span class="kv">snap <b id="s-snap">—</b></span>
   <span class="kv">auctions <b id="s-auc">—</b></span>
@@ -35,6 +37,31 @@
 
 <div id="tip"></div>
 <div id="drop"></div>
+<script>
+// GitHub Pages caches JS for ten minutes, so a reload right after a deploy can
+// pair this fresh page with a stale app.js. That combination renders nothing at
+// all - the old code looks for panel elements this page no longer has - and from
+// the outside it is indistinguishable from the deploy having failed.
+//
+// This runs before the modules and outlives them: whatever app.js turns out to
+// be, if it does not announce the same build id this page was served with, say
+// so plainly instead of leaving a blank screen.
+(function () {
+  var want = document.querySelector('meta[name="build"]').content;
+  if (want === 'dev') return;
+  setTimeout(function () {
+    if (window.__BUILD__ === want) return;
+    var bar = document.createElement('div');
+    bar.className = 'bootfail';
+    bar.textContent = window.__BUILD__
+      ? 'Your browser is running cached code (' + window.__BUILD__.slice(0, 6) + ') against a newer page (' + want.slice(0, 6) + '). Click here to reload.'
+      : 'Your browser served a cached copy of this app that no longer matches the page. Click here to reload.';
+    bar.style.cursor = 'pointer';
+    bar.onclick = function () { location.reload(true); };
+    document.body.prepend(bar);
+  }, 4000);
+})();
+</script>
 <script type="module" src="local-api.js"></script>
 <script type="module" src="app.js"></script>
 <script type="module" src="local-extras.js"></script>

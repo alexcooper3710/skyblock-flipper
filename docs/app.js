@@ -12,6 +12,29 @@ import { makePanel, makeSplit, makeView } from './layout.js';
 // Must match API_VERSION in src/server/server.js.
 const API_VERSION = 3;
 
+// Written by scripts/build-web.js. index.html carries the same value and, unlike
+// the JS, is revalidated on every load - so a mismatch means this file came out
+// of the browser cache while the page did not.
+const BUILD = '9a8638e7';
+
+window.__BUILD__ = BUILD;
+
+(function checkBuild() {
+  const meta = document.querySelector('meta[name="build"]');
+  const want = meta && meta.content;
+  const stamp = $('s-build');
+  if (stamp) {
+    stamp.textContent = BUILD === 'dev' ? 'dev' : BUILD.slice(0, 6);
+    stamp.title = `build ${BUILD}`;
+  }
+  if (!want || want === 'dev' || want === BUILD) return;
+  const bar = el('div', 'bootfail',
+    `You are looking at a cached copy of this page (code ${BUILD.slice(0, 6)}, site ${want.slice(0, 6)}). Reload with Ctrl+Shift+R.`);
+  bar.style.cursor = 'pointer';
+  bar.onclick = () => location.reload(true);
+  document.body.prepend(bar);
+})();
+
 // The layout you get on a first visit, and after Reset: the same six panels the
 // fixed grid used to have, in the same places.
 const defaultLayout = () => makeSplit('row', [
