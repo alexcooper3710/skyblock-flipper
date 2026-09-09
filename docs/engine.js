@@ -40,11 +40,30 @@ export const CONFIG = {
   blacklistIds: ['SKYBLOCK_MENU'], apiKey: '',
 };
 
-async function getJson(path) {
+// Every request gets a deadline. A fetch with no timeout does not fail, it
+// waits - and one stalled connection among the sixty page requests a snapshot
+// needs will hang mapPool forever. The loop never finishes, nothing throws,
+// nothing is logged, and the screen just says "pulling the first snapshot"
+// until you reload. A hang has to become an error before it can be handled.
+const REQUEST_TIMEOUT_MS = 12000;
+
+async function getJson(path, { tries = 2, timeout = REQUEST_TIMEOUT_MS } = {}) {
   const headers = CONFIG.apiKey ? { 'API-Key': CONFIG.apiKey } : {};
-  const r = await fetch(BASE + path, { headers });
-  if (!r.ok) throw new Error(`HTTP ${r.status} on ${path}`);
-  return r.json();
+  let last;
+  for (let attempt = 0; attempt < tries; attempt++) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), timeout);
+    try {
+      const r = await fetch(BASE + path, { headers, signal: ctl.signal });
+      if (r.status === 429 || r.status >= 500) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status} on ${path}`);
+      return await r.json();
+    } catch (e) {
+      last = e.name === 'AbortError' ? new Error(`timed out after ${timeout}ms`) : e;
+      if (attempt + 1 < tries) await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    } finally { clearTimeout(timer); }
+  }
+  throw new Error(`${path}: ${last && last.message}`);
 }
 
 async function mapPool(items, limit, fn) {
@@ -97,6 +116,13 @@ export class Engine extends EventTarget {
       }
       const stage = this.stats.snapshots === 0 ? 'pulling the first auction snapshot'
         : `decoding ${this.stats.decodes.toLocaleString()} of ~${this.stats.totalAuctions.toLocaleString()} listings`;
+      // A full pass is ~40s. Past 90 there is something wrong with the network
+      // rather than something slow, and saying so beats a counter that climbs
+      // forever while the user wonders whether it is broken.
+      if (s > 90) {
+        return { code: 'first-snapshot', elapsed: s, stalled: true,
+          label: `still ${stage} after ${s}s — the auction API is not answering. Retrying.` };
+      }
       return { code: 'first-snapshot', label: `${stage}… ${s}s`, elapsed: s };
     }
     return { code: 'live', label: 'live', elapsed: 0 };
@@ -217,9 +243,24 @@ export class Engine extends EventTarget {
         const head = await this.waitForFresh();
         if (!head) { await this.sleep(2000); continue; }
         const t0 = Date.now();
+        let lost = 0;
         const pages = await mapPool(
           Array.from({ length: head.totalPages }, (_, i) => i), CONFIG.pageConcurrency,
-          async (page) => { try { return (await getJson(`/skyblock/auctions?page=${page}`)).auctions || []; } catch { return []; } });
+          async (page) => {
+            try { return (await getJson(`/skyblock/auctions?page=${page}`)).auctions || []; }
+            catch (e) { lost++; this.lastPageError = e.message; return []; }
+          });
+        // A wall built from a snapshot with holes in it prices every listing in
+        // the missing pages as if it were not on the market at all, which
+        // manufactures flips. Losing one page of sixty is noise; losing five is
+        // a broken snapshot, and skipping it costs a minute rather than money.
+        if (lost > Math.max(2, head.totalPages * 0.05)) {
+          this.stats.discarded = (this.stats.discarded || 0) + 1;
+          this.log('warn', `discarded snapshot: ${lost}/${head.totalPages} pages failed (${this.lastPageError})`);
+          await this.sleep(2000);
+          continue;
+        }
+        if (lost) this.log('warn', `${lost} of ${head.totalPages} pages failed; continuing`);
         await this.processSnapshot(pages.flat(), head.lastUpdated);
         this.stats.lastCycleMs = Date.now() - t0;
         this.emit('stats', { ...this.stats, book: this.book.stats(), warmedUp: this.warmedUp, phase: this.phase() });
